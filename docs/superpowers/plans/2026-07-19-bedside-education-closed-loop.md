@@ -4,9 +4,9 @@
 
 **Goal:** Build the first hospital-wide rollout increment: department-managed multilingual bedside education, an always-visible daily language selector, one-question comprehension confirmation, anonymous session events, automatic session clearing, and migration of existing fixed education without losing data.
 
-**Architecture:** Move structured education content out of `NurseAppConfig.quickAnswers` into a local SQLite repository while retaining the legacy JSON as a migration and rollback source. Add a focused `EducationSessionController` for the bedside state machine, separate workbench/playback/settings widgets, and anonymous event persistence. Keep Xiaozhi AI, encrypted credentials, offline TTS, department branding, and current usage records intact.
+**Architecture:** Move structured education content out of `NurseAppConfig.quickAnswers` into an Android system SQLite repository exposed through a focused Flutter method channel, while retaining the legacy JSON as a migration and rollback source. This avoids downloadable database dependencies and keeps Android 7+ deployment self-contained. Add a focused `EducationSessionController` for the bedside state machine, separate workbench/playback/settings widgets, and anonymous event persistence. Keep Xiaozhi AI, encrypted credentials, offline TTS, department branding, and current usage records intact.
 
-**Tech Stack:** Flutter 3.44, Dart 3.7, Material 3, Provider, sqflite, sqflite_common_ffi for repository tests, SharedPreferences migration source, existing sherpa-onnx offline TTS, Android API 24–36.
+**Tech Stack:** Flutter 3.44, Dart 3.7, Material 3, Provider, Android `SQLiteOpenHelper`, Flutter `MethodChannel`, SharedPreferences migration source, existing sherpa-onnx offline TTS, Android API 24–36.
 
 ## Global Constraints
 
@@ -37,7 +37,7 @@
 - Consumes: `OfflineSpeechLanguage` from `lib/models/offline_speech_language.dart`.
 - Produces: `EducationLanguageContent`, `EducationItem`, `ComprehensionResult`, `EducationItem.contentFor()`, `EducationItem.isAvailableIn()`, `EducationItem.copyWith()`, JSON round-trip APIs, and shared `educationFixture()`／`reviewedItem` test fixtures used by all later tasks.
 
-- [ ] **Step 1: Write failing model tests**
+- [x] **Step 1: Write failing model tests**
 
 ```dart
 test('education item round-trips multilingual content and question', () {
@@ -109,7 +109,7 @@ LocalQuickAnswer customLegacyAnswer(int index) => LocalQuickAnswer(
 );
 ```
 
-- [ ] **Step 2: Run the test and verify RED**
+- [x] **Step 2: Run the test and verify RED**
 
 Run:
 
@@ -119,7 +119,7 @@ flutter test --no-pub test/features/education/education_item_test.dart
 
 Expected: FAIL because the education domain classes do not exist.
 
-- [ ] **Step 3: Implement immutable models and validation**
+- [x] **Step 3: Implement immutable models and validation**
 
 Implement `EducationLanguageContent` with these exact fields and guards:
 
@@ -161,7 +161,7 @@ class EducationLanguageContent {
 
 `EducationItem.isAvailableIn(language)` returns true only when the item is enabled and the selected language content is published and complete. `needsReview` produces an administrator warning badge but does not make migrated clinical content disappear. New or edited translations cannot be published while `needsReview` is true. JSON language keys use `OfflineSpeechLanguage.name`.
 
-- [ ] **Step 4: Run model tests and full analyzer**
+- [x] **Step 4: Run model tests and full analyzer**
 
 Run:
 
@@ -172,40 +172,35 @@ dart analyze lib test
 
 Expected: both commands exit 0.
 
-- [ ] **Step 5: Commit the model slice**
+- [x] **Step 5: Commit the model slice**
 
 ```bash
 git add lib/features/education/models test/features/education/education_item_test.dart
 git commit -m "feat: add structured bedside education models"
 ```
 
-### Task 2: Add SQLite Repository and Lossless Legacy Migration
+### Task 2: Add Native Android SQLite Repository and Lossless Legacy Migration
 
 **Files:**
-- Modify: `pubspec.yaml`
-- Modify: `pubspec.lock`
-- Create: `lib/features/education/data/education_database.dart`
 - Create: `lib/features/education/data/education_repository.dart`
-- Create: `lib/features/education/data/sqflite_education_repository.dart`
+- Create: `lib/features/education/data/native_education_repository.dart`
 - Create: `lib/features/education/data/legacy_education_migrator.dart`
+- Create: `android/app/src/main/kotlin/com/digitalnurse/app/EducationDatabaseHelper.kt`
+- Create: `android/app/src/main/kotlin/com/digitalnurse/app/EducationDatabaseChannel.kt`
+- Modify: `android/app/src/main/kotlin/com/digitalnurse/app/MainActivity.kt`
 - Test: `test/features/education/education_repository_test.dart`
 - Test: `test/features/education/legacy_education_migrator_test.dart`
 - Test support: `test/features/education/fake_education_repository.dart`
 
 **Interfaces:**
 - Consumes: `EducationItem`, `LocalQuickAnswer`, and `NurseAppConfig.quickAnswers`.
-- Produces: `EducationDatabase.open({DatabaseFactory factory, String path})`, `EducationRepository.loadActive()`, `save()`, `replaceAll()`, `softDelete()`, `reorder()`, `LegacyEducationMigrator.migrateIfNeeded()`, and `FakeEducationRepository` for widget tests.
+- Produces: `NativeEducationRepository`, `EducationRepository.loadActive()`, `save()`, `replaceAll()`, `replaceAllAndMarkLegacyMigrated()`, `softDelete()`, `reorder()`, `LegacyEducationMigrator.migrateIfNeeded()`, and `FakeEducationRepository` for widget tests.
 
-- [ ] **Step 1: Add repository contract tests using an in-memory database**
+- [x] **Step 1: Add repository channel contract tests**
 
 ```dart
 test('repository saves, orders, versions, and soft deletes education', () async {
-  sqfliteFfiInit();
-  final database = await EducationDatabase.open(
-    factory: databaseFactoryFfi,
-    path: inMemoryDatabasePath,
-  );
-  final repository = SqfliteEducationRepository(database);
+  final repository = NativeEducationRepository(channel: mockedChannel);
   final itemA = educationFixture(id: 'a', sortOrder: 0);
   final itemB = educationFixture(id: 'b', sortOrder: 1);
   await repository.replaceAll([itemB.copyWith(sortOrder: 1), itemA]);
@@ -219,7 +214,7 @@ test('repository saves, orders, versions, and soft deletes education', () async 
 });
 ```
 
-- [ ] **Step 2: Run repository tests and verify RED**
+- [x] **Step 2: Run repository tests and verify RED**
 
 Run:
 
@@ -227,21 +222,11 @@ Run:
 flutter test --no-pub test/features/education/education_repository_test.dart
 ```
 
-Expected: FAIL because the repository and database schema do not exist.
+Expected: FAIL because the native repository and database channel do not exist.
 
-- [ ] **Step 3: Add dependencies and database schema**
+- [x] **Step 3: Add the native database channel and schema**
 
-Add:
-
-```yaml
-dependencies:
-  sqflite: ^2.4.2
-
-dev_dependencies:
-  sqflite_common_ffi: ^2.3.6
-```
-
-Create database version 1 with:
+Use Android's built-in `SQLiteOpenHelper`; do not add any Flutter database dependency. Create database version 1 with:
 
 ```sql
 CREATE TABLE education_items (
@@ -259,9 +244,9 @@ CREATE TABLE education_items (
 )
 ```
 
-Create `education_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)` and store `legacy_migration_completed=1` only after all legacy rows commit successfully inside one transaction.
+Create `education_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)` and store `legacy_migration_completed=1` only after all legacy rows commit successfully inside one native transaction. Dart calls this atomic operation through `replaceAllAndMarkLegacyMigrated()`.
 
-- [ ] **Step 4: Write legacy migration tests**
+- [x] **Step 4: Write legacy migration tests**
 
 ```dart
 test('migration keeps every custom quick answer and marks generated questions for review', () async {
@@ -283,11 +268,11 @@ test('migration keeps every custom quick answer and marks generated questions fo
 });
 ```
 
-- [ ] **Step 5: Implement transactional migration**
+- [x] **Step 5: Implement transactional migration**
 
 For each `LocalQuickAnswer`, preserve all three titles and bodies. Generate a safe temporary self-check in each language, set `needsReview: true`, and keep the item playable. The generated Mandarin question is “您是否理解以上宣教内容？”, options are “我已理解”, “请再播放一次”, and “请护士进一步解释”; it is not scored as a knowledge check. Default bundled items receive reviewed knowledge-check fixtures stored in `lib/features/education/data/default_education_items.dart`.
 
-- [ ] **Step 6: Run repository, migration, and existing configuration tests**
+- [x] **Step 6: Run repository, migration, and existing configuration tests**
 
 Run:
 
@@ -300,7 +285,7 @@ Expected: all tests pass and existing quick-answer migration tests remain green.
 - [ ] **Step 7: Commit persistence and migration**
 
 ```bash
-git add pubspec.yaml pubspec.lock lib/features/education/data test/features/education
+git add android/app/src/main/kotlin/com/digitalnurse/app/EducationDatabaseHelper.kt android/app/src/main/kotlin/com/digitalnurse/app/EducationDatabaseChannel.kt android/app/src/main/kotlin/com/digitalnurse/app/MainActivity.kt lib/features/education/data test/features/education
 git commit -m "feat: persist and migrate bedside education content"
 ```
 
@@ -309,7 +294,9 @@ git commit -m "feat: persist and migrate bedside education content"
 **Files:**
 - Create: `lib/features/education/models/education_session_event.dart`
 - Create: `lib/features/education/data/education_event_repository.dart`
-- Create: `lib/features/education/data/sqflite_education_event_repository.dart`
+- Create: `lib/features/education/data/native_education_event_repository.dart`
+- Modify: `android/app/src/main/kotlin/com/digitalnurse/app/EducationDatabaseHelper.kt`
+- Modify: `android/app/src/main/kotlin/com/digitalnurse/app/EducationDatabaseChannel.kt`
 - Create: `lib/features/education/controllers/education_session_controller.dart`
 - Test: `test/features/education/education_session_controller_test.dart`
 - Test support: `test/features/education/fake_education_event_repository.dart`
@@ -372,9 +359,9 @@ enum EducationSessionStage {
 
 Generate session IDs from secure random bytes. Persist only session ID, department ID, item ID, item version, language, event type, attempt, integer value, and timestamp. Do not add patient fields. `requestNurseHelp()` records the event and sets a prominent nurse-help state without ending the session.
 
-- [ ] **Step 4: Add database event table**
+- [ ] **Step 4: Add native database event table**
 
-Upgrade database to version 2 and create:
+Upgrade the Android system database to version 2 and create:
 
 ```sql
 CREATE TABLE education_events (
@@ -701,7 +688,7 @@ git commit -m "feat: report anonymous bedside education outcomes"
 
 **Interfaces:**
 - Consumes: repository, migrator, session controller, current `NurseController`, and current configuration.
-- Produces: initialized education repository before the home screen becomes interactive, with legacy rollback data untouched; the test file defines `legacyV014Preferences()`, `UpgradeHarness`, and `buildUpgradeHarness()` against temporary preferences and an in-memory database.
+- Produces: initialized education repository before the home screen becomes interactive, with legacy rollback data untouched; the test file defines `legacyV014Preferences()`, `UpgradeHarness`, and `buildUpgradeHarness()` against temporary preferences and a mocked native repository channel.
 
 - [ ] **Step 1: Write failing upgrade integration test**
 
