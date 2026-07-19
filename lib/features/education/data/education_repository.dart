@@ -3,6 +3,8 @@ import '../models/education_item.dart';
 abstract interface class EducationRepository {
   Future<List<EducationItem>> loadActive();
 
+  Future<List<EducationItem>> loadAll();
+
   Future<void> replaceAll(List<EducationItem> items);
 
   Future<void> replaceAllAndMarkLegacyMigrated(List<EducationItem> items);

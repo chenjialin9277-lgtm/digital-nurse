@@ -18,6 +18,16 @@ class NativeEducationRepository implements EducationRepository {
     final encodedItems = await _channel.invokeMethod<List<dynamic>>(
       'loadActive',
     );
+    return _decodeItems(encodedItems);
+  }
+
+  @override
+  Future<List<EducationItem>> loadAll() async {
+    final encodedItems = await _channel.invokeMethod<List<dynamic>>('loadAll');
+    return _decodeItems(encodedItems);
+  }
+
+  List<EducationItem> _decodeItems(List<dynamic>? encodedItems) {
     if (encodedItems == null) return const [];
     final items =
         encodedItems.map((encoded) {

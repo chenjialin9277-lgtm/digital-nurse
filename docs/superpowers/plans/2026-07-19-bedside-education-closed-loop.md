@@ -388,7 +388,7 @@ flutter test --no-pub test/features/education/education_session_controller_test.
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit the state machine**
+- [x] **Step 6: Commit the state machine**
 
 ```bash
 git add lib/features/education/controllers lib/features/education/models/education_session_event.dart lib/features/education/data test/features/education
@@ -410,7 +410,7 @@ git commit -m "feat: add anonymous bedside education sessions"
 - Consumes: `EducationRepository`, `EducationItem`, and administrator-authenticated settings context.
 - Produces: validated create, edit, copy, soft-delete, enable, favorite, reorder, multilingual publish operations, `educationTestApp(Widget child)`, and `fillKnowledgeQuestion(WidgetTester tester)` test helpers.
 
-- [ ] **Step 1: Write failing administrator UI tests**
+- [x] **Step 1: Write failing administrator UI tests**
 
 ```dart
 testWidgets('administrator can add an item and publish Mandarin only', (tester) async {
@@ -430,7 +430,7 @@ testWidgets('administrator can add an item and publish Mandarin only', (tester) 
 });
 ```
 
-- [ ] **Step 2: Run the UI test and verify RED**
+- [x] **Step 2: Run the UI test and verify RED**
 
 Run:
 
@@ -440,17 +440,17 @@ flutter test --no-pub test/features/education/education_management_dialog_test.d
 
 Expected: FAIL because management widgets do not exist.
 
-- [ ] **Step 3: Build modular editors with validation**
+- [x] **Step 3: Build modular editors with validation**
 
 Validation rules are exact: title 1–40 characters; body 1–1200; summary 0–120; question 1–120; 2–4 non-empty unique options; correct index in range; explanation 1–240; estimated minutes 1–30. Publishing Cantonese or English requires every field in that language to pass. Draft saving is allowed, but drafts never appear to patients.
 
-- [ ] **Step 4: Replace the large inline fixed-answer editor**
+- [x] **Step 4: Replace the large inline fixed-answer editor**
 
 Remove `_quickTitles`, `_quickAnswers`, `_cantoneseTitles`, `_cantoneseAnswers`, `_englishTitles`, and `_englishAnswers` from `NurseConfigDialog`. Replace the old expansion list with a summary card showing active item count and a password-context-safe “管理本科室宣教内容” button that opens `EducationManagementDialog`.
 
 Keep `NurseAppConfig.quickAnswers` serialization unchanged as a rollback source until v1.0 migration is proven on real devices.
 
-- [ ] **Step 5: Run settings and large-font tests**
+- [x] **Step 5: Run settings and large-font tests**
 
 Run:
 

@@ -15,6 +15,14 @@ class FakeEducationRepository implements EducationRepository {
   }
 
   @override
+  Future<List<EducationItem>> loadAll() async {
+    final values =
+        _items.values.toList()
+          ..sort((left, right) => left.sortOrder.compareTo(right.sortOrder));
+    return List.unmodifiable(values);
+  }
+
+  @override
   Future<void> replaceAll(List<EducationItem> items) async {
     _items
       ..clear()
@@ -35,8 +43,7 @@ class FakeEducationRepository implements EducationRepository {
 
   @override
   Future<void> softDelete(String id) async {
-    final item = _items[id];
-    if (item != null) _items[id] = item.copyWith(enabled: false);
+    _items.remove(id);
   }
 
   @override

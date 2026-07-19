@@ -24,10 +24,13 @@ void main() {
           final arguments = (call.arguments as Map?)?.cast<String, dynamic>();
           switch (call.method) {
             case 'loadActive':
+            case 'loadAll':
               final active =
                   items.values
                       .where(
-                        (item) => !deletedIds.contains(item.id) && item.enabled,
+                        (item) =>
+                            !deletedIds.contains(item.id) &&
+                            (call.method == 'loadAll' || item.enabled),
                       )
                       .toList()
                     ..sort(
@@ -128,5 +131,14 @@ void main() {
 
     expect(await repository.isLegacyMigrationCompleted(), isTrue);
     expect((await repository.loadActive()).single.id, 'legacy');
+  });
+
+  test('管理端可读取已停用但未删除的宣教', () async {
+    final repository = NativeEducationRepository(channel: channel);
+    final disabled = educationFixture(id: 'disabled').copyWith(enabled: false);
+    await repository.replaceAll([disabled]);
+
+    expect(await repository.loadActive(), isEmpty);
+    expect((await repository.loadAll()).single.id, 'disabled');
   });
 }

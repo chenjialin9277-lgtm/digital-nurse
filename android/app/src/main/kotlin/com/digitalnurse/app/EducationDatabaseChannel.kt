@@ -30,6 +30,7 @@ class EducationDatabaseChannel(
             try {
                 val value: Any? = when (call.method) {
                     "loadActive" -> database.loadActive()
+                    "loadAll" -> database.loadAll()
                     "replaceAll" -> {
                         database.replaceAll(call.stringListArgument("items"))
                         null
@@ -107,6 +108,7 @@ class EducationDatabaseChannel(
         private const val CHANNEL_NAME = "digital_nurse/education_database"
         private val SUPPORTED_METHODS = setOf(
             "loadActive",
+            "loadAll",
             "replaceAll",
             "replaceAllAndMarkLegacyMigrated",
             "save",

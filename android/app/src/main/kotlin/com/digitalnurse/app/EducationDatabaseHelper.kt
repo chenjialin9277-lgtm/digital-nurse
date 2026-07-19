@@ -66,11 +66,19 @@ class EducationDatabaseHelper(context: Context) :
     }
 
     fun loadActive(): List<String> {
+        return loadItems("enabled = 1 AND deleted = 0")
+    }
+
+    fun loadAll(): List<String> {
+        return loadItems("deleted = 0")
+    }
+
+    private fun loadItems(selection: String): List<String> {
         val encodedItems = mutableListOf<String>()
         readableDatabase.query(
             EDUCATION_TABLE,
             arrayOf("contents_json"),
-            "enabled = 1 AND deleted = 0",
+            selection,
             null,
             null,
             null,
