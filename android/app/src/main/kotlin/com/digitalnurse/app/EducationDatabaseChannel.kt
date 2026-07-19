@@ -58,6 +58,14 @@ class EducationDatabaseChannel(
                         database.markLegacyMigrationCompleted()
                         null
                     }
+                    "saveEducationEvent" -> {
+                        database.saveEducationEvent(call.requiredStringArgument("event"))
+                        null
+                    }
+                    "loadEducationEvents" -> database.loadEducationEvents(
+                        call.requiredStringArgument("start"),
+                        call.requiredStringArgument("end"),
+                    )
                     else -> null
                 }
                 mainHandler.post { result.success(value) }
@@ -106,6 +114,8 @@ class EducationDatabaseChannel(
             "reorder",
             "isLegacyMigrationCompleted",
             "markLegacyMigrationCompleted",
+            "saveEducationEvent",
+            "loadEducationEvents",
         )
     }
 }

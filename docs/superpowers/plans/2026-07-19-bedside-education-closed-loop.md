@@ -282,7 +282,7 @@ flutter test --no-pub test/features/education/education_repository_test.dart tes
 
 Expected: all tests pass and existing quick-answer migration tests remain green.
 
-- [ ] **Step 7: Commit persistence and migration**
+- [x] **Step 7: Commit persistence and migration**
 
 ```bash
 git add android/app/src/main/kotlin/com/digitalnurse/app/EducationDatabaseHelper.kt android/app/src/main/kotlin/com/digitalnurse/app/EducationDatabaseChannel.kt android/app/src/main/kotlin/com/digitalnurse/app/MainActivity.kt lib/features/education/data test/features/education
@@ -305,7 +305,7 @@ git commit -m "feat: persist and migrate bedside education content"
 - Consumes: `EducationItem`, `LocalSpeechService`, `OfflineSpeechLanguage`, and `EducationEventRepository`.
 - Produces: `EducationSessionStage`, `EducationSessionState`, controller methods `startSession()`, `selectItem()`, `beginPlayback()`, `markSpeechComplete()`, `submitAnswer()`, `requestNurseHelp()`, `replay()`, `finishSession()`, `clearTransientState()`, and `FakeEducationEventRepository.saved` for tests.
 
-- [ ] **Step 1: Write failing state-machine tests**
+- [x] **Step 1: Write failing state-machine tests**
 
 ```dart
 test('speech completion opens question and correct answer completes item', () async {
@@ -334,7 +334,7 @@ test('finish clears patient-facing text but preserves anonymous events', () asyn
 });
 ```
 
-- [ ] **Step 2: Run controller tests and verify RED**
+- [x] **Step 2: Run controller tests and verify RED**
 
 Run:
 
@@ -344,7 +344,7 @@ flutter test --no-pub test/features/education/education_session_controller_test.
 
 Expected: FAIL because the session controller does not exist.
 
-- [ ] **Step 3: Implement explicit session stages**
+- [x] **Step 3: Implement explicit session stages**
 
 ```dart
 enum EducationSessionStage {
@@ -359,7 +359,7 @@ enum EducationSessionStage {
 
 Generate session IDs from secure random bytes. Persist only session ID, department ID, item ID, item version, language, event type, attempt, integer value, and timestamp. Do not add patient fields. `requestNurseHelp()` records the event and sets a prominent nurse-help state without ending the session.
 
-- [ ] **Step 4: Add native database event table**
+- [x] **Step 4: Add native database event table**
 
 Upgrade the Android system database to version 2 and create:
 
@@ -378,7 +378,7 @@ CREATE TABLE education_events (
 )
 ```
 
-- [ ] **Step 5: Run controller and database migration tests**
+- [x] **Step 5: Run controller and database migration tests**
 
 Run:
 
