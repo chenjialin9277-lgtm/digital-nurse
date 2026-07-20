@@ -10,6 +10,7 @@ import 'package:digital_nurse/repositories/nurse_config_repository.dart';
 import 'package:digital_nurse/screens/nurse_screen.dart';
 import 'package:digital_nurse/services/local_speech_service.dart';
 import 'package:digital_nurse/services/usage_export_service.dart';
+import 'package:digital_nurse/services/xiaozhi_service.dart';
 import 'package:digital_nurse/theme/nurse_theme.dart';
 import 'package:digital_nurse/widgets/nurse_config_dialog.dart';
 import 'package:flutter/material.dart';
@@ -121,6 +122,71 @@ void main() {
     expect(controller.config.quickAnswers, hasLength(8));
     expect(controller.verifySettingsPassword('123456'), isTrue);
     expect(controller.verifySettingsPassword('654321'), isFalse);
+  });
+
+  test('固定回答完成后恢复在线音频', () async {
+    final speech = _FakeLocalSpeechService();
+    final online = _FakeXiaozhiService();
+    final controller = NurseController(
+      localSpeechService: speech,
+      xiaozhiService: online,
+    )..config = NurseAppConfig.defaults('', '');
+
+    await controller.playLocalQuickAnswer(controller.config.quickAnswers.first);
+    expect(online.suspendCalls, 1);
+
+    speech.complete();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(online.resumeCalls, 1);
+  });
+
+  test('固定回答错误后恢复在线音频', () async {
+    final speech = _FakeLocalSpeechService();
+    final online = _FakeXiaozhiService();
+    final controller = NurseController(
+      localSpeechService: speech,
+      xiaozhiService: online,
+    )..config = NurseAppConfig.defaults('', '');
+
+    await controller.playLocalQuickAnswer(controller.config.quickAnswers.first);
+    speech.fail();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(online.resumeCalls, 1);
+  });
+
+  test('固定回答异常后恢复在线音频', () async {
+    final speech = _FakeLocalSpeechService()..throwOnSpeak = true;
+    final online = _FakeXiaozhiService();
+    final controller = NurseController(
+      localSpeechService: speech,
+      xiaozhiService: online,
+    )..config = NurseAppConfig.defaults('', '');
+
+    await controller.playLocalQuickAnswer(controller.config.quickAnswers.first);
+
+    expect(online.resumeCalls, 1);
+  });
+
+  test('显式停止固定回答后恢复在线音频', () async {
+    final speech = _FakeLocalSpeechService();
+    final online = _FakeXiaozhiService();
+    final controller =
+        NurseController(localSpeechService: speech, xiaozhiService: online)
+          ..config = NurseAppConfig.defaults(
+            '02:11:22:33:44:55',
+            '11111111-2222-4333-8444-555555555555',
+          ).copyWith(
+            websocketUrl: 'wss://example.invalid/xiaozhi/v1/',
+            token: 'test-token',
+          )
+          ..state = NurseUiState.idle;
+
+    await controller.playLocalQuickAnswer(controller.config.quickAnswers.first);
+    await controller.startPushToTalk();
+
+    expect(online.resumeCalls, 1);
   });
 
   test('旧版普通话固定回答保留并自动补全粤语英语', () {
@@ -459,6 +525,7 @@ void main() {
 class _FakeLocalSpeechService extends LocalSpeechService {
   String? spoken;
   OfflineSpeechLanguage? spokenLanguage;
+  bool throwOnSpeak = false;
   final _controller = StreamController<LocalSpeechEvent>.broadcast(sync: true);
 
   @override
@@ -469,6 +536,7 @@ class _FakeLocalSpeechService extends LocalSpeechService {
     String text, {
     OfflineSpeechLanguage language = OfflineSpeechLanguage.mandarin,
   }) async {
+    if (throwOnSpeak) throw StateError('speech failed');
     spoken = text;
     spokenLanguage = language;
     _controller.add(LocalSpeechEvent.started);
@@ -478,6 +546,36 @@ class _FakeLocalSpeechService extends LocalSpeechService {
     _controller.add(LocalSpeechEvent.completed);
   }
 
+  void fail() {
+    _controller.add(LocalSpeechEvent.error);
+  }
+
   @override
   Future<void> stop() async {}
+}
+
+class _FakeXiaozhiService extends XiaozhiService {
+  _FakeXiaozhiService()
+    : super(
+        websocketUrl: 'wss://example.invalid/xiaozhi/v1/',
+        macAddress: '02:11:22:33:44:55',
+        clientId: '11111111-2222-4333-8444-555555555555',
+        token: 'test-token',
+      );
+
+  int suspendCalls = 0;
+  int resumeCalls = 0;
+
+  @override
+  Future<void> suspendOnlinePlayback() async {
+    suspendCalls++;
+  }
+
+  @override
+  Future<void> resumeOnlinePlayback() async {
+    resumeCalls++;
+  }
+
+  @override
+  Future<void> startListening({String mode = 'manual'}) async {}
 }

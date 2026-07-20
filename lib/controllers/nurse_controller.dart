@@ -40,6 +40,7 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
     AppUsageRepository? usageRepository,
     XiaozhiProvisioningService? provisioningService,
     LocalSpeechService? localSpeechService,
+    XiaozhiService? xiaozhiService,
     EducationRepository? educationRepository,
     EducationEventRepository? educationEventRepository,
   }) : _repository = repository ?? NurseConfigRepository(),
@@ -47,6 +48,7 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
        _provisioningService =
            provisioningService ?? const XiaozhiProvisioningService(),
        _localSpeech = localSpeechService ?? const LocalSpeechService(),
+       _service = xiaozhiService,
        _educationRepository =
            educationRepository ?? NativeEducationRepository(),
        _educationEventRepository =
@@ -392,8 +394,12 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> startPushToTalk() async {
     if (_service == null || !config.canConnect || isPressingToTalk) return;
     if (_playingLocalAnswer) {
-      await _localSpeech.stop();
-      _playingLocalAnswer = false;
+      try {
+        await _localSpeech.stop();
+      } finally {
+        _playingLocalAnswer = false;
+        await resumeOnlineAudioAfterEducation();
+      }
     }
     if (state == NurseUiState.speaking) {
       await _service!.sendAbortMessage();
@@ -436,9 +442,14 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
       }
       // The Xiaozhi PCM player holds exclusive Android audio focus even while
       // idle. Releasing it lets the system TTS engine produce audible speech.
-      await _service!.stopPlayback();
+      await suspendOnlineAudioForEducation();
     }
-    await _localSpeech.stop();
+    try {
+      await _localSpeech.stop();
+    } catch (_) {
+      await resumeOnlineAudioAfterEducation();
+      rethrow;
+    }
     _stateBeforeLocalAnswer = state;
     _resetCaptionForAnswer();
     final language = config.offlineSpeechLanguage;
@@ -462,6 +473,11 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
     } catch (_) {
       // The standard text remains available even if Android has no Chinese
       // speech engine installed.
+      try {
+        await _localSpeech.stop();
+      } finally {
+        await resumeOnlineAudioAfterEducation();
+      }
       _revealThrough(_captionTarget.length);
       _playingLocalAnswer = false;
       state = _hasReadySession ? NurseUiState.idle : _stateBeforeLocalAnswer;
@@ -475,7 +491,14 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
     if (language == config.offlineSpeechLanguage) return;
     _captionTimer?.cancel();
     _localCaptionFallbackTimer?.cancel();
-    await _localSpeech.stop();
+    final wasPlayingLocalAnswer = _playingLocalAnswer;
+    try {
+      await _localSpeech.stop();
+    } finally {
+      if (wasPlayingLocalAnswer) {
+        await resumeOnlineAudioAfterEducation();
+      }
+    }
     if (_playingLocalAnswer) {
       _playingLocalAnswer = false;
       state = _hasReadySession ? NurseUiState.idle : _stateBeforeLocalAnswer;
@@ -486,6 +509,14 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
     // Model extraction/loading may take a few seconds on the first switch. It
     // happens immediately after selection so playback itself starts faster.
     unawaited(_localSpeech.prepare(language).catchError((_) {}));
+  }
+
+  Future<void> suspendOnlineAudioForEducation() async {
+    await _service?.suspendOnlinePlayback();
+  }
+
+  Future<void> resumeOnlineAudioAfterEducation() async {
+    await _service?.resumeOnlinePlayback();
   }
 
   bool verifySettingsPassword(String input) => input == config.settingsPassword;
@@ -504,6 +535,7 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
       _playingLocalAnswer = false;
       state = _hasReadySession ? NurseUiState.idle : _stateBeforeLocalAnswer;
       notifyListeners();
+      unawaited(resumeOnlineAudioAfterEducation());
     }
   }
 
@@ -511,7 +543,14 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
     unawaited(_usageRepository.record(AppUsageType.contactNurse));
     _captionTimer?.cancel();
     _localCaptionFallbackTimer?.cancel();
-    unawaited(_localSpeech.stop());
+    final wasPlayingLocalAnswer = _playingLocalAnswer;
+    unawaited(
+      _localSpeech.stop().whenComplete(() async {
+        if (wasPlayingLocalAnswer) {
+          await resumeOnlineAudioAfterEducation();
+        }
+      }),
+    );
     _playingLocalAnswer = false;
     state = NurseUiState.warning;
     assistantText = config.callNurseText;
