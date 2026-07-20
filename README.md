@@ -1,132 +1,84 @@
-<div align="center">
-  <a href="./README.md">中文</a> | 
-  <a href="./README_EN.md">English</a> | 
-  <a href="./README_VI.md">Tiếng Việt</a> |
-  <a href="./yuandan-update.md">元旦更新</a> |
-</div>
+# 数字护士 Android 平板客户端
 
-# 小智AI助手 Android IOS 客户端
-<p align="center">
-  <a href="https://github.com/TOM88812/xiaozhi-android-client/releases/latest">
-    <img src="https://img.shields.io/github/v/release/TOM88812/xiaozhi-android-client?style=flat-square&logo=github&color=blue" alt="Release"/>
-  </a>
-  <a href="https://opensource.org/licenses/Apache-2.0">
-    <img src="https://img.shields.io/badge/License-Apache_2.0-green.svg?style=flat-square" alt="License: Apache-2.0"/>
-  </a>
-  <a href="https://github.com/TOM88812/xiaozhi-android-client/stargazers">
-    <img src="https://img.shields.io/github/stars/TOM88812/xiaozhi-android-client?style=flat-square&logo=github" alt="Stars"/>
-  </a>
-  <a href="https://github.com/TOM88812/xiaozhi-android-client/releases/latest">
-    <img src="https://img.shields.io/github/downloads/TOM88812/xiaozhi-android-client/total?style=flat-square&logo=github&color=52c41a1&maxAge=86400" alt="Download"/>
-  </a>
-  <a href="https://wiki.lhht.cc">
-    <img src="https://img.shields.io/badge/文档-Wiki-yellow?logo=wikipedia">
-  </a>
+面向 Android 横屏平板的数字护士客户端。应用通过小智 AI 连接科室智能体和知识库，同时提供可扩展的三语离线床旁宣教、理解确认、匿名使用统计和 Excel 导出。
 
-</p>
+## 当前版本
 
-> 目前已经发布新版本，敬请体验！flutter IOS与安卓回音消除已实现，~~欢迎大家PR~~。
-> 觉得项目对您有用的，可以赞赏一下，您的每一次赞赏都是我前进的动力。
-> Dify支持发送图片交互。可以添加多个小智智能体到聊天列表。
+- 版本：0.15.0 床旁宣教闭环版
+- Android：最低 Android 7.0（API 24）
+- 屏幕：优先适配 14 英寸横屏平板
+- 分发：APK 侧载，不依赖任何应用商店
+- 权限：网络、麦克风、音频控制
+- 协议：小智 AI WebSocket + Opus 16 kHz 单声道音频
 
-一个基于WebSocket的Android语音对话应用,支持实时语音交互和文字对话。
-基于Flutter框架开发的小智AI助手，支持多平台（iOS、Android、Web、Windows、macOS、Linux）部署，提供实时语音交互和文字对话功能。
+## v0.3 品牌与人物形象
 
-<table>
-  <tr>
-    <td align="center" valign="bottom" height="500">
-      <table>
-        <tr>
-          <td align="center">
-            <a href="https://www.bilibili.com/video/BV178EqzAEFf" target="_blank">
-              <img src="1234.jpg" alt="新版"  width="200" height="430"/>
-            </a>
-          </td>
-        </tr>
-        <tr>
-          <td align="center">
-            <small>
-  新版IOS、安卓端（可以自行打包WEB、PC版本)<br>
-  <a href="https://www.bilibili.com/video/BV1fgXvYqE61" style="color: red; text-decoration: none;">观看demo视频点击跳转</a>
-</small>
-          </td>
-        </tr>
-      </table>
-    </td>
-  </tr>
-</table>
+- 默认医院：广州中医药大学第三附属医院
+- 默认病区：急诊病房
+- 顶部同时显示医院 Logo 与急诊病房科室 Logo
+- 使用经授权真人参考照片制作半写实数字护士形象
+- 保留呼吸浮动、状态光环、聆听/思考/说话状态和说话音频条动画
 
-### V3 版本 商业版功能（深度适配自研服务端） 💼 
-| 功能模块 | 状态 | 描述 |
-|---------|------|------|
-| **自适应主题** | ✅ | 深色/浅色主题适配/跟随设备切换主题 |
-| **AI服务提供商** | ✅ | 支持Openai、MiniMax等服务，手机上也能用大模型 |
-| **思考模式** | ✅ | 支持Openai思考模式 |
-| **HTML代码预览** | ✅ | 模型写简单HTML代码进行预览，手机也能ai编程 |
-| **MCP_Client** | ✅ | 支持MCP能力调用，接口数据都能DIY|
-| **OpenAI接口联网搜索** | ✅ | 支持Oenai 接口服务联网搜索|
-| **视频播放** | ✅ | 支持播放模型返回的视频 |
-| **OpenAI 测速** | ✅ | openai接口响应测速，服务快不快一眼见|
-| **Live2D** | ✅ | 多模型切换、支持导入自己心爱的模型人物 |
-| **Iot** | ✅ | 支持调用手机功能、导航、听歌等 |
-| **创新性心情模式** | ✅ | 支持实时打断模式 |
-| **MQTT-UDP** | ✅ | 支持MQTT协议服务，长连接 |
-| **WS** | ✅ | 支持ws协议服务 |
-| **语音实时打断** | ✅ | 能在小智说话的期间随意打断，说您想说无人能挡 |
-| **多小智服务** | ✅ | 添加多个小智服务，轻松实现每人多助手 |
-| **打通硬件端** | ✅ | 可与硬件端互通，记忆不串 |
-| **深度适配服务端** | ✅ | 适配商业版服务端 |
-| **用户信息** | ✅ | 展示会员到期时间，对话数量、绑定设备数量、声纹数量、配额使用情况、最近活动设备|
-| **设备管理** | ✅ | 支持手机端查看当前登录用户的所有设备、新增设备 |
-| **角色管理** | ✅ | 支持手机端管理您当前角色、新建角色|
-| **声纹管理** | ✅ | 支持手机端录制声纹，让您的AI更懂您|
-| **对话记录** | ✅ | 支持展示最近的对话记录|
-| **记忆管理** | ✅ | 支持展示记忆|
-| **预留页面** | ✅ | 预留记账、代办、日记等页面UI，可集成小智后端能力扩展，协同小智，打造了解您的助手|
+## v0.4 使用体验优化
 
-### 服务端 商业版功能 💼 
-| 功能模块 | 状态 | 描述 |
-|---------|------|------|
-| **首句响应** | ✅ | 唤醒词响应时间 <1秒，极速响应体验 |
-| **平均响应速度** | ✅ | 平均对话响应时间 <2秒（公网CDN网络）（本地内网极限800ms内），流畅对话体验 |
-| **MQTT协议** | ✅ | 支持MQTT通信协议，长连接、服务端主动唤醒 |
-| **音色克隆** | ✅ | 支持火山引擎音色克隆，实现个性化声音定制 |
-| **声纹识别** | ✅ | 支持声纹识别功能，实现个性化语音助手 |
-| **双向流式交互** | ✅ | 支持火山流式播放，实时语音输入和回复输出 |
-| **用户端** | ✅ | 友好的用户端操作界面，原生卡片方式设备管理页面 |
-| **MCP接入点** | ✅ | 基于角色的MCP工具接入点，扩展功能接入（同步虾哥服务） |
-| **MCP Hub服务** | ✅ | SSE/HTTP MCP Hub支持更多第三方服务集成 |
-| **ESP32 设备主题自定义** | ✅ | 支持在线配置esp32设备的主题、表情包 |
-| **Function Call** | ✅ | 工具调用，提升用户体验 |
-| **长期记忆** | ✅ | 根据用户对话，提取关键信息记录，智能记忆管理 |
-| **监控面板** | ✅ | 监控日、周、月不同维度Token，对话时长，设备活跃等数据 |
-| **OTA固件升级** | ✅ | 固件上传，自动升级，远程设备管理 |
-| **聊天数据可视化** | ✅ | 聊天频率统计图表等数据可视化功能，监控对话数据趋势 |
-| **用户会员制** | ✅ | 支持更具会员等级设置Token数，支持包月/年，在线支付（支付宝、微信、PayPal） |
+- 长回答字幕不再按句覆盖，改为整段累积显示
+- 字幕依据小智 TTS 句子事件逐字出现，并在句尾自动校准
+- 字幕区域支持自动跟随最新内容，也可手工上下滑动回看
+- WebSocket 握手完成后才进入连接状态，避免假连接提示
+- 断线按 2、4、8、15、30 秒渐进退避重连，短暂波动不再反复覆盖字幕
+- 设置中可切换深海科技、医疗清雅、岭南青玉、温馨关怀四套显示风格
 
+## v0.8 固定宣教与形象融合
 
-## 联系方式
-- ## **email**
-> tang@lhht.cc
+- 8 项固定宣教均由 APP 本地保存和播放，可在密码保护的设置页修改，不经过小智知识库。
+- 点击固定宣教时先释放小智 PCM 音频通道，再使用 Android 本地中文 TTS 播放。
+- 固定宣教字幕在语音开始后逐字显示，播放完成后保留全文。
+- 数字护士保持用户提供的静态真人形象，不叠加不自然的眼嘴动效；仅优化缩放、裁切和主题背景融合。
 
-- **wechat**
-> Tang_xs-xk
+## v0.9 内置离线普通话
 
-# 支持提供定制化开发客户端可以联系WeChat
+- 固定宣教不再调用 Android 系统 TTS，避免小米系统缺少中文语音引擎时只显示字幕但没有声音。
+- APP 内置 sherpa-onnx 离线运行库和普通话女声模型，断网时仍可生成语音。
+- 神经语音生成在独立工作线程运行，不阻塞平板界面；语音开始后逐字显示字幕。
+- 发布 APK 仅包含 Xiaomi Pad 6 Max 需要的 arm64 语音库，以控制安装包体积。
 
-## 服务端图形化部署工具
-- https://space.bilibili.com/298384872
-- https://znhblog.com/
+## v0.10 普通话 / 粤语 / 英语离线切换
 
-## 🌟支持
+- 主界面固定宣教区直接提供“普通话 / 粤语 / English”切换，不需进入设置。
+- 切换时，8 个选项名称、固定回答、逐字字幕和离线语音同时切换，并记住上次选择。
+- 设置页可分别编辑三种语言的 8 项内容；旧版已保存的普通话内容会自动保留。
+- 三套语音模型全部随 APK 分发，断网可用，且任何时候只在内存中加载当前选中的一套。
+- 当前仍属内部测试版。普通话“小雅”明确限非商业使用，粤语和英语模型的商用权利也须在正式发布前完成核验；详见 `RELEASE_CHECKLIST.md`。
 
-您的每一个start⭐或赞赏💖，都是我们不断前进的动力🛸。
-<div style="display: flex;">
-<img src="zsm.jpg" width="260" height="280" alt="赞助" style="border-radius: 12px;" />
-</div>
+## v0.15 床旁宣教闭环
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/V7V71I0TE0)
+- 首页一键进入床旁宣教工作台，支持分类、搜索、收藏和最近使用。
+- 普通话、粤语、英语可在主界面及宣教界面直接切换；未审核发布的译文不会默认回退为普通话。
+- 科室管理员可新增、复制、排序、停用和分语言发布宣教，数量不再限于 8 项。
+- 离线语音播放后进入理解确认；支持重播、请护士解释、完成和隐私清屏。
+- 床旁会话超时自动清屏；不记录患者姓名、住院号、床号、电话、诊断或治疗信息。
+- 使用记录可按日期查询，并导出包含 5 张工作表的 Excel 文件。
+- 升级时自动迁移旧版科室自定义内容；宣教库异常时仍保留旧版应急宣教入口。
+- 发布包为通用 APK，覆盖 `armeabi-v7a`、`arm64-v8a` 和 `x86_64`。
 
-## Star History
+## 首次激活
 
-[![Star History Chart](https://api.star-history.com/svg?repos=TOM88812/xiaozhi-android-client&type=Date)](https://star-history.com/#TOM88812/xiaozhi-android-client&Date)
+默认使用小智 AI 官方平台。APP 会按照官方固件流程自动生成独立设备 ID，从官方 OTA 配置接口取得激活码，并在绑定后自动取得 WebSocket 地址、Token 与协议版本。用户无需查找或手工填写 Token。
+
+首次启动后，在 `xiaozhi.me` 登录小智账号，添加设备并输入 APP 显示的激活码。平板作为独立设备接入，不复用 ESP32-S3 的设备 ID；绑定后可在控制台为平板选择与 ESP32 相同的智能体和知识库。
+
+设置页仍保留“自建服务器”高级模式，可手工填写 WebSocket 地址和 Token。Token 使用 Android 加密存储，仅保存在本机。
+
+## 使用方式
+
+按住主按钮说话，松开后等待小智知识库回答。也可以点击“入院注意事项”“住院安全须知”“出院流程”等快捷问题。涉及病情变化、诊断、用药或紧急情况时应联系医护人员，不以数字护士回答替代专业医疗判断。
+
+## 构建
+
+项目使用 Flutter 3.44、JDK 17 和 Android SDK 36。发布版需要保留 `android/app/digital-nurse-release.jks` 与 `android/key.properties`，否则后续 APK 无法覆盖升级已安装版本。
+
+## 开源说明
+
+通信与基础音频实现参考并改造自 `TOM88812/xiaozhi-android-client`（Apache-2.0）。小智 ESP32 官方固件仓库为 `78/xiaozhi-esp32`（MIT）。本项目内维护的 PCM 播放器源自 `rocchen/flutter_pcm_player`（BSD 类许可），已为新版 Android 构建链修复命名空间与播放生命周期。
+
+详细版权与许可证见 `LICENSE`、`NOTICE` 及 `packages/flutter_pcm_player/LICENSE`。

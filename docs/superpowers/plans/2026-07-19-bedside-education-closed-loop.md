@@ -757,7 +757,7 @@ git commit -m "feat: integrate bedside education upgrade path"
 - Consumes: completed Phase One implementation and release signing key.
 - Produces: signed universal APK, source backup, checksums, and user-facing update notes.
 
-- [ ] **Step 1: Bump version**
+- [x] **Step 1: Bump version**
 
 Set:
 
@@ -765,7 +765,7 @@ Set:
 version: 0.15.0+17
 ```
 
-- [ ] **Step 2: Run fresh verification**
+- [x] **Step 2: Run fresh verification**
 
 Run:
 
@@ -777,7 +777,7 @@ flutter test --no-pub
 
 Expected: format exits 0, analyzer reports no issues, and every test passes.
 
-- [ ] **Step 3: Build signed universal release APK**
+- [x] **Step 3: Build signed universal release APK**
 
 Build from a temporary path without spaces, preserving the existing signing configuration:
 
@@ -787,19 +787,19 @@ flutter build apk --release --no-pub
 
 Expected: `app-release.apk` is created and contains `armeabi-v7a`, `arm64-v8a`, and `x86_64` libraries.
 
-- [ ] **Step 4: Verify identity and signature**
+- [x] **Step 4: Verify identity and signature**
 
 Verify package `com.digitalnurse.app`, version code `17`, version name `0.15.0`, minimum SDK `24`, target SDK `36`, v2 signature validity, and certificate SHA-256 `4baff6b7d01271a1bbc8627696540616c2223ca3dc02690d7e00f37214517c47`.
 
-- [ ] **Step 5: Document installation and release blockers**
+- [x] **Step 5: Document installation and release blockers**
 
 Update notes must instruct users to install over v0.14.1 without uninstalling. Keep the explicit release blocker that ordinary Mandarin “小雅”, Cantonese, and English model commercial rights must be resolved before hospital-wide formal publication.
 
-- [ ] **Step 6: Package source and calculate checksums**
+- [x] **Step 6: Package source and calculate checksums**
 
 Create a private source/material/model/signing backup excluding build caches, calculate SHA-256 for APK and backup, and place all deliverables under `/Users/jialeisi/Desktop/数字人/outputs`.
 
-- [ ] **Step 7: Commit release metadata**
+- [x] **Step 7: Commit release metadata**
 
 ```bash
 git add pubspec.yaml README.md RELEASE_CHECKLIST.md
