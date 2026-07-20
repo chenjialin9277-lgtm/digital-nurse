@@ -216,7 +216,8 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.byType(ActionChip), findsNWidgets(20));
+    expect(find.byType(ActionChip), findsNothing);
+    expect(find.text('开始床旁宣教'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -379,8 +380,9 @@ void main() {
 
       expect(find.bySemanticsLabel('广州中医药大学第三附属医院'), findsOneWidget);
       expect(find.bySemanticsLabel('急诊病房科室标志'), findsOneWidget);
-      expect(find.byType(ActionChip), findsNWidgets(8));
-      expect(find.text('怎么办理出院？'), findsOneWidget);
+      expect(find.byType(ActionChip), findsNothing);
+      expect(find.text('开始床旁宣教'), findsOneWidget);
+      expect(find.text('怎么办理出院？'), findsNothing);
       expect(find.text('普通话'), findsOneWidget);
       expect(find.text('粤语'), findsOneWidget);
       expect(find.text('English'), findsOneWidget);
