@@ -101,11 +101,25 @@ class EducationSessionController extends ChangeNotifier {
       sessionId: _state.sessionId,
       language: _state.language,
       selectedItem: item,
-      visibleCaption: item.contentFor(_state.language).body,
+      visibleCaption: '',
       attempt: _state.attempt,
     );
     notifyListeners();
     await _save(EducationEventType.playbackStarted);
+  }
+
+  void updateVisibleCaption(String caption) {
+    final item = _requireItem();
+    _requireStage(const {EducationSessionStage.playing}, '只有播报期间可以更新字幕');
+    _state = EducationSessionState(
+      stage: _state.stage,
+      sessionId: _state.sessionId,
+      language: _state.language,
+      selectedItem: item,
+      visibleCaption: caption,
+      attempt: _state.attempt,
+    );
+    notifyListeners();
   }
 
   Future<void> markSpeechComplete() async {
@@ -148,14 +162,14 @@ class EducationSessionController extends ChangeNotifier {
       selectedItem: item,
       visibleCaption: _state.visibleCaption,
       result: result,
-      feedbackTitle: result.isCorrect ? '本次理解确认完成' : '请再查看正确说明',
+      feedbackTitle: result.isCorrect ? '本次理解确认完成' : '我们再看一下重点',
       attempt: attempt,
     );
     notifyListeners();
     await _save(
       EducationEventType.answer,
       attempt: attempt,
-      value: selectedIndex,
+      value: result.isCorrect ? 1 : 0,
     );
   }
 

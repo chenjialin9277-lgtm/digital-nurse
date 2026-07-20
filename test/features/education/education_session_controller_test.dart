@@ -63,6 +63,7 @@ void main() {
     await controller.startSession(OfflineSpeechLanguage.english);
     await controller.selectItem(reviewedItem);
     await controller.beginPlayback();
+    controller.updateVisibleCaption('请配合护士');
     expect(controller.state.visibleCaption, isNotEmpty);
 
     await controller.finishSession();
