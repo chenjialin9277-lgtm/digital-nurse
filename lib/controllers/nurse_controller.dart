@@ -59,6 +59,9 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   final EducationRepository _educationRepository;
   final EducationEventRepository _educationEventRepository;
   Future<void>? _educationInitialization;
+  Future<void>? _localStateInitialization;
+  Future<void>? _remoteInitialization;
+  bool _lifecycleInstalled = false;
   XiaozhiService? _service;
   Timer? _activationTimer;
   Timer? _captionTimer;
@@ -83,26 +86,50 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   String? errorMessage;
   String? activationCode;
   String? activationMessage;
+  String? educationInitializationError;
   bool isPressingToTalk = false;
 
-  Future<void> initialize() async {
-    WidgetsBinding.instance.addObserver(this);
-    _networkSubscription = const NetworkMonitor().changes.listen(
-      _handleNetworkAvailability,
-      onError: (_) {
-        // The platform signal is an optimization. WebSocket ping/reconnect
-        // remains the source of truth if the signal is unavailable.
-      },
-    );
-    _localSpeechSubscription = _localSpeech.events.listen(
-      _handleLocalSpeechEvent,
-      onError: (_) {},
-    );
-    config = await _repository.load();
+  bool get educationFallbackActive => educationInitializationError != null;
+
+  Future<void> initializeLocalState() {
+    final existing = _localStateInitialization;
+    if (existing != null) return existing;
+    final initialization = _initializeLocalState();
+    _localStateInitialization = initialization;
+    return initialization;
+  }
+
+  Future<void> _initializeLocalState() async {
+    if (!_lifecycleInstalled) {
+      WidgetsBinding.instance.addObserver(this);
+      _networkSubscription = const NetworkMonitor().changes.listen(
+        _handleNetworkAvailability,
+        onError: (_) {
+          // The platform signal is an optimization. WebSocket ping/reconnect
+          // remains the source of truth if the signal is unavailable.
+        },
+      );
+      _localSpeechSubscription = _localSpeech.events.listen(
+        _handleLocalSpeechEvent,
+        onError: (_) {},
+      );
+      _lifecycleInstalled = true;
+    }
+    try {
+      config = await _repository.load();
+    } catch (error) {
+      educationInitializationError = '本地配置读取失败：$error';
+      state = NurseUiState.setupRequired;
+      assistantText = '本地配置暂时无法读取，已启用应急宣教。请联系管理员检查。';
+      notifyListeners();
+      return;
+    }
     try {
       await _ensureEducationInitialized();
-    } catch (_) {
-      // 宣教库加载失败不能阻断小智问答；用户打开工作台时会再试。
+      educationInitializationError = null;
+    } catch (error) {
+      // 宣教库异常不阻断小智问答，首页保留旧版固定宣教作为应急入口。
+      educationInitializationError = '宣教库初始化失败：$error';
     }
     if (!config.departmentConfigured) {
       state = NurseUiState.setupRequired;
@@ -115,6 +142,27 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
     unawaited(
       _localSpeech.prepare(config.offlineSpeechLanguage).catchError((_) {}),
     );
+    state = NurseUiState.connecting;
+    errorMessage = null;
+    notifyListeners();
+  }
+
+  Future<void> initialize() async {
+    await initializeLocalState();
+    final existing = _remoteInitialization;
+    if (existing != null) return existing;
+    final initialization = _initializeRemoteState();
+    _remoteInitialization = initialization;
+    try {
+      await initialization;
+    } catch (_) {
+      _remoteInitialization = null;
+      rethrow;
+    }
+  }
+
+  Future<void> _initializeRemoteState() async {
+    if (!config.departmentConfigured) return;
     if (config.officialPlatform) {
       await provisionOfficialPlatform();
     } else if (config.canConnect) {
@@ -126,7 +174,14 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<List<EducationItem>> loadActiveEducation() async {
-    await _ensureEducationInitialized();
+    try {
+      await _ensureEducationInitialized();
+      educationInitializationError = null;
+    } catch (error) {
+      educationInitializationError = '宣教库加载失败：$error';
+      notifyListeners();
+      rethrow;
+    }
     return _educationRepository.loadActive();
   }
 
@@ -608,7 +663,7 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    if (_lifecycleInstalled) WidgetsBinding.instance.removeObserver(this);
     _activationTimer?.cancel();
     _captionTimer?.cancel();
     _localCaptionFallbackTimer?.cancel();

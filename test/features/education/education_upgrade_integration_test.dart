@@ -94,6 +94,67 @@ void main() {
     expect(find.text('床旁宣教工作台'), findsOneWidget);
     expect(educationRepository.loadCalls, 1);
   });
+
+  test('本地启动阶段必须先读取旧配置再执行宣教迁移', () async {
+    final legacyAnswer = LocalQuickAnswer(
+      title: '启动竞态保留内容',
+      answer: '这条内容不能被默认值覆盖。',
+      cantoneseTitle: '啟動競態保留內容',
+      cantoneseAnswer: '呢條內容唔能被預設值覆蓋。',
+      englishTitle: 'Preserved legacy content',
+      englishAnswer: 'This content must not be replaced by defaults.',
+    );
+    final delayedConfig = _DelayedNurseConfigRepository();
+    final educationRepository = FakeEducationRepository();
+    final controller = NurseController(
+      repository: delayedConfig,
+      educationRepository: educationRepository,
+      educationEventRepository: FakeEducationEventRepository(),
+    );
+
+    final initialization = controller.initializeLocalState();
+    await Future<void>.delayed(Duration.zero);
+    expect(educationRepository.migrationCompleted, isFalse);
+
+    delayedConfig.release(
+      NurseAppConfig.defaults(
+        'device',
+        'client',
+      ).copyWith(departmentConfigured: false, quickAnswers: [legacyAnswer]),
+    );
+    await initialization;
+
+    final migrated = await educationRepository.loadActive();
+    expect(migrated.single.contents.values.first.title, legacyAnswer.title);
+    expect(controller.config.quickAnswers.single.title, legacyAnswer.title);
+  });
+
+  testWidgets('宣教库初始化失败时保留旧版应急宣教入口', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final config = NurseAppConfig.defaults(
+      'device',
+      'client',
+    ).copyWith(departmentConfigured: false);
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(config),
+      educationRepository: _FailingEducationRepository(),
+      educationEventRepository: FakeEducationEventRepository(),
+    );
+    await controller.initializeLocalState();
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: const DigitalNurseApp(home: NurseScreen()),
+      ),
+    );
+
+    expect(find.text('宣教库异常，已启用旧版应急宣教'), findsOneWidget);
+    expect(find.text('入院注意事项'), findsOneWidget);
+    expect(find.text('开始床旁宣教'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _FakeNurseConfigRepository extends NurseConfigRepository {
@@ -108,6 +169,25 @@ class _FakeNurseConfigRepository extends NurseConfigRepository {
   Future<void> save(NurseAppConfig config) async {
     value = config;
   }
+}
+
+class _DelayedNurseConfigRepository extends NurseConfigRepository {
+  final _completer = Completer<NurseAppConfig>();
+
+  void release(NurseAppConfig config) {
+    if (!_completer.isCompleted) _completer.complete(config);
+  }
+
+  @override
+  Future<NurseAppConfig> load() => _completer.future;
+
+  @override
+  Future<void> save(NurseAppConfig config) async {}
+}
+
+class _FailingEducationRepository extends FakeEducationRepository {
+  @override
+  Future<bool> isLegacyMigrationCompleted() async => throw StateError('db');
 }
 
 class _BlockingLoadEducationRepository extends FakeEducationRepository {

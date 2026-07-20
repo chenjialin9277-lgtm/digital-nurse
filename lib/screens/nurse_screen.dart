@@ -528,14 +528,18 @@ class _InteractionPanel extends StatelessWidget {
           Row(
             children: [
               Text(
-                '固定宣教',
+                controller.educationFallbackActive ? '宣教库异常，已启用旧版应急宣教' : '固定宣教',
                 style: TextStyle(
-                  color: palette.textSecondary,
+                  color:
+                      controller.educationFallbackActive
+                          ? const Color(0xFFB65F22)
+                          : palette.textSecondary,
                   fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(width: 8),
-              _BedsideLaunchButton(onPressed: onStartBedsideEducation),
+              if (!controller.educationFallbackActive)
+                _BedsideLaunchButton(onPressed: onStartBedsideEducation),
               const Spacer(),
               DailyLanguageSelector(
                 value: controller.config.offlineSpeechLanguage,
@@ -547,6 +551,28 @@ class _InteractionPanel extends StatelessWidget {
               ),
             ],
           ),
+          if (controller.educationFallbackActive) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 44,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: controller.config.quickAnswers.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final item = controller.config.quickAnswers[index];
+                  return ActionChip(
+                    avatar: const Icon(Icons.volume_up_outlined, size: 18),
+                    label: Text(
+                      item.titleFor(controller.config.offlineSpeechLanguage),
+                    ),
+                    onPressed:
+                        () => unawaited(controller.playLocalQuickAnswer(item)),
+                  );
+                },
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Row(
             children: [

@@ -20,12 +20,10 @@ class EducationAnalyticsService {
     required DateTime endDate,
     List<EducationItem> items = const [],
   }) async {
-    final start = DateTime.utc(startDate.year, startDate.month, startDate.day);
-    final dayAfterEnd = DateTime.utc(
-      endDate.year,
-      endDate.month,
-      endDate.day + 1,
-    );
+    final start =
+        DateTime(startDate.year, startDate.month, startDate.day).toUtc();
+    final dayAfterEnd =
+        DateTime(endDate.year, endDate.month, endDate.day + 1).toUtc();
     final rows = await events.loadBetween(start, dayAfterEnd);
     final estimatedMinutes = {
       for (final item in items) item.id: item.estimatedManualMinutes,

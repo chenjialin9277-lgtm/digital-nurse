@@ -460,7 +460,7 @@ flutter test --no-pub test/features/education/education_management_dialog_test.d
 
 Expected: all tests pass with no overflow at 1.3× font scale.
 
-- [ ] **Step 6: Commit the management UI**
+- [x] **Step 6: Commit the management UI**
 
 ```bash
 git add lib/features/education/widgets lib/widgets/nurse_config_dialog.dart test/features/education/education_management_dialog_test.dart
@@ -481,7 +481,7 @@ git commit -m "feat: add department education management"
 - Consumes: active `EducationItem` list, `OfflineSpeechLanguage`, `EducationSessionController`, and `NurseController.setOfflineSpeechLanguage()`.
 - Produces: normal-workflow language switching, category/search/favorite/recent filtering, selection of a playable item, and test-local builders `buildNurseAppWithEducation(List<EducationItem>)` and `buildBedsideScreen(List<EducationItem>)` defined in `bedside_education_screen_test.dart`.
 
-- [ ] **Step 1: Write failing language and workbench tests**
+- [x] **Step 1: Write failing language and workbench tests**
 
 ```dart
 testWidgets('language switch is visible without opening settings', (tester) async {
@@ -501,7 +501,7 @@ testWidgets('unpublished target-language item is marked unavailable', (tester) a
 });
 ```
 
-- [ ] **Step 2: Run workbench tests and verify RED**
+- [x] **Step 2: Run workbench tests and verify RED**
 
 Run:
 
@@ -511,15 +511,15 @@ flutter test --no-pub test/features/education/bedside_education_screen_test.dart
 
 Expected: FAIL because the shared language selector and workbench do not exist.
 
-- [ ] **Step 3: Implement a shared language selector**
+- [x] **Step 3: Implement a shared language selector**
 
 `DailyLanguageSelector` accepts `value`, `onChanged`, and `compact`. It uses three `ChoiceChip`s with fixed visible labels `普通话`, `粤语`, and `English`. It is rendered both on the main interaction panel and at the top of `BedsideEducationScreen`; it never checks administrator state.
 
-- [ ] **Step 4: Implement the workbench**
+- [x] **Step 4: Implement the workbench**
 
 The screen includes a back button, selected language, category chips, local search, favorites, recent items, and a scrollable list. Selecting an unavailable translation shows the reason and does not silently fall back to Mandarin. Selecting an available item calls `session.selectItem(item)` and navigates to playback.
 
-- [ ] **Step 5: Run 1024×600 and 1920×1200 widget tests**
+- [x] **Step 5: Run 1024×600 and 1920×1200 widget tests**
 
 Run:
 
@@ -529,7 +529,7 @@ flutter test --no-pub test/features/education/bedside_education_screen_test.dart
 
 Expected: all tests pass with zero overflow exceptions.
 
-- [ ] **Step 6: Commit the workbench**
+- [x] **Step 6: Commit the workbench**
 
 ```bash
 git add lib/features/education/screens lib/features/education/widgets/daily_language_selector.dart lib/features/education/widgets/education_catalog.dart lib/controllers/nurse_controller.dart lib/screens/nurse_screen.dart test/features/education/bedside_education_screen_test.dart
@@ -550,7 +550,7 @@ git commit -m "feat: add bedside education workbench"
 - Consumes: `EducationSessionController`, `LocalSpeechEvent`, and `DailyLanguageSelector`.
 - Produces: synchronized playback/captions, question transition, replay, nurse-help path, session completion, transient-state clearing, and test-local `buildSessionController()`／`buildPlaybackApp()` builders defined in `education_playback_screen_test.dart`.
 
-- [ ] **Step 1: Write failing end-to-end widget flow**
+- [x] **Step 1: Write failing end-to-end widget flow**
 
 ```dart
 testWidgets('playback opens question, gives neutral correction, and clears on finish', (tester) async {
@@ -575,7 +575,7 @@ testWidgets('playback opens question, gives neutral correction, and clears on fi
 });
 ```
 
-- [ ] **Step 2: Run playback test and verify RED**
+- [x] **Step 2: Run playback test and verify RED**
 
 Run:
 
@@ -585,19 +585,19 @@ flutter test --no-pub test/features/education/education_playback_screen_test.dar
 
 Expected: FAIL because playback and comprehension widgets do not exist.
 
-- [ ] **Step 3: Implement patient-facing playback**
+- [x] **Step 3: Implement patient-facing playback**
 
 Use the existing offline TTS and progressive caption mechanism. The patient page shows department header, AI-assistance label, language selector, large caption, summary, progress, playback controls, and “请护士进一步解释”. Disable language switching while audio is actively playing; after pause or completion, switching reloads the reviewed content for the selected language.
 
-- [ ] **Step 4: Implement comprehension and feedback copy**
+- [x] **Step 4: Implement comprehension and feedback copy**
 
 Correct title: `本次理解确认完成`. Incorrect title: `我们再看一下重点`. Nurse-help title: `请责任护士进一步解释`. Never display red failure language, scores, ranks, or claims of full understanding.
 
-- [ ] **Step 5: Implement lifecycle clearing**
+- [x] **Step 5: Implement lifecycle clearing**
 
 Observe `AppLifecycleState.paused`, `inactive`, and `detached`; stop local audio and call `clearTransientState()`. Add a configurable inactivity timer with a default of 5 minutes during a bedside session. Display a 30-second warning before clearing. Explicit finish clears immediately.
 
-- [ ] **Step 6: Run playback, lifecycle, and existing TTS tests**
+- [x] **Step 6: Run playback, lifecycle, and existing TTS tests**
 
 Run:
 
@@ -607,7 +607,7 @@ flutter test --no-pub test/features/education/education_playback_screen_test.dar
 
 Expected: all tests pass.
 
-- [ ] **Step 7: Commit patient playback**
+- [x] **Step 7: Commit patient playback**
 
 ```bash
 git add lib/features/education/screens/education_playback_screen.dart lib/features/education/widgets/comprehension_card.dart lib/features/education/widgets/education_feedback_card.dart lib/features/education/controllers/education_session_controller.dart lib/services/local_speech_service.dart test/features/education/education_playback_screen_test.dart
@@ -628,7 +628,7 @@ git commit -m "feat: complete bedside education comprehension flow"
 - Consumes: `education_events` rows and existing usage report date range.
 - Produces: session count, play count, completion rate, replay count, first-attempt correct rate, nurse-help count, language distribution, additional Excel sheets, and `sampleEducationEvents` in the shared test fixtures.
 
-- [ ] **Step 1: Write failing analytics formula tests**
+- [x] **Step 1: Write failing analytics formula tests**
 
 ```dart
 test('summary calculates first-attempt accuracy and nurse-help rate', () {
@@ -641,7 +641,7 @@ test('summary calculates first-attempt accuracy and nurse-help rate', () {
 });
 ```
 
-- [ ] **Step 2: Run analytics tests and verify RED**
+- [x] **Step 2: Run analytics tests and verify RED**
 
 Run:
 
@@ -651,15 +651,15 @@ flutter test --no-pub test/features/education/education_analytics_service_test.d
 
 Expected: FAIL because the summary does not exist.
 
-- [ ] **Step 3: Implement exact metric denominators**
+- [x] **Step 3: Implement exact metric denominators**
 
 Completion rate denominator is playback-start events; first-attempt accuracy denominator is items with a submitted first attempt; nurse-help rate denominator is completed bedside sessions. Zero denominators return 0, never NaN.
 
-- [ ] **Step 4: Add education sections to usage UI and Excel**
+- [x] **Step 4: Add education sections to usage UI and Excel**
 
 Add read-only cards for the selected date range and Excel worksheets named `床旁宣教汇总`, `理解确认`, and `宣教事件明细`. Event detail contains random session ID but no patient fields. The report includes a note that estimated saved time is an estimate.
 
-- [ ] **Step 5: Run export and existing usage tests**
+- [x] **Step 5: Run export and existing usage tests**
 
 Run:
 
@@ -669,7 +669,7 @@ flutter test --no-pub test/features/education/education_analytics_service_test.d
 
 Expected: all tests pass and existing worksheets remain present.
 
-- [ ] **Step 6: Commit analytics**
+- [x] **Step 6: Commit analytics**
 
 ```bash
 git add lib/features/education/models/education_analytics_summary.dart lib/features/education/data/education_analytics_service.dart lib/widgets/usage_records_dialog.dart lib/services/usage_export_service.dart test/features/education
@@ -690,7 +690,7 @@ git commit -m "feat: report anonymous bedside education outcomes"
 - Consumes: repository, migrator, session controller, current `NurseController`, and current configuration.
 - Produces: initialized education repository before the home screen becomes interactive, with legacy rollback data untouched; the test file defines `legacyV014Preferences()`, `UpgradeHarness`, and `buildUpgradeHarness()` against temporary preferences and a mocked native repository channel.
 
-- [ ] **Step 1: Write failing upgrade integration test**
+- [x] **Step 1: Write failing upgrade integration test**
 
 ```dart
 testWidgets('v0.14 custom content migrates and remains playable after upgrade', (tester) async {
@@ -707,7 +707,7 @@ testWidgets('v0.14 custom content migrates and remains playable after upgrade', 
 });
 ```
 
-- [ ] **Step 2: Run the upgrade test and verify RED**
+- [x] **Step 2: Run the upgrade test and verify RED**
 
 Run:
 
@@ -717,15 +717,15 @@ flutter test --no-pub test/features/education/education_upgrade_integration_test
 
 Expected: FAIL because startup does not initialize or migrate the education database.
 
-- [ ] **Step 3: Wire dependency initialization**
+- [x] **Step 3: Wire dependency initialization**
 
 Open the database, run migration, load active education, and then notify the UI. If database initialization fails, keep the current v0.14 fixed-answer UI available and show an administrator-visible diagnostic message; do not present an empty catalog.
 
-- [ ] **Step 4: Preserve quick-answer rollback source**
+- [x] **Step 4: Preserve quick-answer rollback source**
 
 Do not remove `quickAnswers` from `NurseAppConfig`, JSON, `copyWith`, or SharedPreferences. When administrators save new education, write a compatibility snapshot back to `quickAnswers` using only the currently published three-language title/body fields so rollback to v0.14 does not produce an empty fixed-answer list.
 
-- [ ] **Step 5: Run the complete automated suite**
+- [x] **Step 5: Run the complete automated suite**
 
 Run:
 
@@ -736,7 +736,7 @@ dart analyze lib test
 
 Expected: all tests pass and analyzer reports `No issues found!`.
 
-- [ ] **Step 6: Commit integration**
+- [x] **Step 6: Commit integration**
 
 ```bash
 git add lib/main.dart lib/controllers/nurse_controller.dart lib/screens/nurse_screen.dart lib/models/nurse_app_config.dart test/features/education/education_upgrade_integration_test.dart test/widget_test.dart

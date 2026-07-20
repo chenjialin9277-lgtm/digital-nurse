@@ -1,5 +1,7 @@
 import 'package:digital_nurse/features/education/models/education_analytics_summary.dart';
 import 'package:digital_nurse/features/education/models/education_session_event.dart';
+import 'package:digital_nurse/features/education/data/education_analytics_service.dart';
+import 'package:digital_nurse/features/education/data/education_event_repository.dart';
 import 'package:digital_nurse/models/offline_speech_language.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -32,6 +34,59 @@ void main() {
     expect(summary.nurseHelpRate, 0);
     expect(summary.completionRate.isNaN, isFalse);
   });
+
+  test('未完成会话的求助不计入已完成会话的护士协助率', () {
+    final events = [
+      ..._sampleEducationEvents(),
+      EducationSessionEvent(
+        id: 'orphan-help',
+        sessionId: 'cleared-session',
+        departmentId: 'emergency_ward',
+        itemId: 'admission',
+        itemVersion: 1,
+        language: OfflineSpeechLanguage.mandarin,
+        type: EducationEventType.nurseHelp,
+        attempt: null,
+        value: null,
+        occurredAt: DateTime.utc(2026, 7, 20, 9),
+      ),
+    ];
+
+    final summary = EducationAnalyticsSummary.fromEvents(events);
+
+    expect(summary.nurseHelpCount, 1);
+    expect(summary.nurseHelpRate, closeTo(0.5, 0.001));
+  });
+
+  test('按本地自然日换算UTC边界查询', () async {
+    final repository = _CapturingEventRepository();
+    final service = EducationAnalyticsService(events: repository);
+    final startDate = DateTime(2026, 7, 20, 16, 30);
+    final endDate = DateTime(2026, 7, 22, 9, 15);
+
+    await service.query(startDate: startDate, endDate: endDate);
+
+    expect(repository.start, DateTime(2026, 7, 20).toUtc());
+    expect(repository.end, DateTime(2026, 7, 23).toUtc());
+  });
+}
+
+class _CapturingEventRepository implements EducationEventRepository {
+  DateTime? start;
+  DateTime? end;
+
+  @override
+  Future<List<EducationSessionEvent>> loadBetween(
+    DateTime start,
+    DateTime end,
+  ) async {
+    this.start = start;
+    this.end = end;
+    return const [];
+  }
+
+  @override
+  Future<void> save(EducationSessionEvent event) async {}
 }
 
 List<EducationSessionEvent> _sampleEducationEvents() {

@@ -92,7 +92,7 @@ class EducationAnalyticsSummary {
       replayCount: replays,
       firstAttemptAnswerCount: firstAnswers,
       firstAttemptCorrectCount: firstCorrect,
-      nurseHelpCount: nurseHelpSessions.length,
+      nurseHelpCount: nurseHelpSessions.intersection(completedSessions).length,
       languageCounts: languages,
       estimatedSavedMinutes: estimatedMinutes,
     );
