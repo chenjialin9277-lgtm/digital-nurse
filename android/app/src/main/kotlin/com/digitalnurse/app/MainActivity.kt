@@ -97,11 +97,23 @@ class MainActivity : FlutterActivity() {
                         val fileName = call.argument<String>("fileName")
                         val summaryRows = call.argument<List<List<Any?>>>("summaryRows")
                         val detailRows = call.argument<List<List<Any?>>>("detailRows")
+                        val educationSummaryRows =
+                            call.argument<List<List<Any?>>>("educationSummaryRows")
+                        val comprehensionRows =
+                            call.argument<List<List<Any?>>>("comprehensionRows")
+                        val educationEventRows =
+                            call.argument<List<List<Any?>>>("educationEventRows")
                         if (fileName.isNullOrBlank() || summaryRows == null || detailRows == null) {
                             result.error("EMPTY_REPORT", "表格内容为空", null)
                         } else {
                             try {
-                                val bytes = buildXlsx(summaryRows, detailRows)
+                                val bytes = buildXlsx(
+                                    summaryRows,
+                                    detailRows,
+                                    educationSummaryRows,
+                                    comprehensionRows,
+                                    educationEventRows,
+                                )
                                 saveUsageXlsx(fileName, bytes, result)
                             } catch (error: Exception) {
                                 result.error("EXPORT_FAILED", error.message, null)
@@ -510,27 +522,49 @@ class MainActivity : FlutterActivity() {
     private fun buildXlsx(
         summaryRows: List<List<Any?>>,
         detailRows: List<List<Any?>>,
+        educationSummaryRows: List<List<Any?>>?,
+        comprehensionRows: List<List<Any?>>?,
+        educationEventRows: List<List<Any?>>?,
     ): ByteArray {
+        val sheets = mutableListOf(
+            XlsxSheet("统计汇总", summaryRows, true),
+            XlsxSheet("使用明细", detailRows, false),
+        )
+        if (educationSummaryRows != null &&
+            comprehensionRows != null &&
+            educationEventRows != null
+        ) {
+            sheets += XlsxSheet("床旁宣教汇总", educationSummaryRows, true)
+            sheets += XlsxSheet("理解确认", comprehensionRows, false)
+            sheets += XlsxSheet("宣教事件明细", educationEventRows, false)
+        }
         val output = ByteArrayOutputStream()
         ZipOutputStream(output).use { zip ->
-            addZipEntry(zip, "[Content_Types].xml", contentTypesXml())
+            addZipEntry(zip, "[Content_Types].xml", contentTypesXml(sheets.size))
             addZipEntry(zip, "_rels/.rels", rootRelationshipsXml())
-            addZipEntry(zip, "xl/workbook.xml", workbookXml())
-            addZipEntry(zip, "xl/_rels/workbook.xml.rels", workbookRelationshipsXml())
+            addZipEntry(zip, "xl/workbook.xml", workbookXml(sheets))
+            addZipEntry(
+                zip,
+                "xl/_rels/workbook.xml.rels",
+                workbookRelationshipsXml(sheets.size),
+            )
             addZipEntry(zip, "xl/styles.xml", stylesXml())
-            addZipEntry(
-                zip,
-                "xl/worksheets/sheet1.xml",
-                worksheetXml(summaryRows, summarySheet = true),
-            )
-            addZipEntry(
-                zip,
-                "xl/worksheets/sheet2.xml",
-                worksheetXml(detailRows, summarySheet = false),
-            )
+            sheets.forEachIndexed { index, sheet ->
+                addZipEntry(
+                    zip,
+                    "xl/worksheets/sheet${index + 1}.xml",
+                    worksheetXml(sheet.rows, summarySheet = sheet.summary),
+                )
+            }
         }
         return output.toByteArray()
     }
+
+    private data class XlsxSheet(
+        val name: String,
+        val rows: List<List<Any?>>,
+        val summary: Boolean,
+    )
 
     private fun addZipEntry(zip: ZipOutputStream, path: String, content: String) {
         zip.putNextEntry(ZipEntry(path))
@@ -538,35 +572,47 @@ class MainActivity : FlutterActivity() {
         zip.closeEntry()
     }
 
-    private fun contentTypesXml() = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    private fun contentTypesXml(sheetCount: Int): String {
+        val worksheets = (1..sheetCount).joinToString("") { index ->
+            "<Override PartName=\"/xl/worksheets/sheet$index.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
+        }
+        return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
           <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
           <Default Extension="xml" ContentType="application/xml"/>
           <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-          <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-          <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+          $worksheets
           <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
         </Types>""".trimIndent()
+    }
 
     private fun rootRelationshipsXml() = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
           <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
         </Relationships>""".trimIndent()
 
-    private fun workbookXml() = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    private fun workbookXml(sheets: List<XlsxSheet>): String {
+        val sheetNodes = sheets.mapIndexed { index, sheet ->
+            "<sheet name=\"${escapeXml(sheet.name)}\" sheetId=\"${index + 1}\" r:id=\"rId${index + 1}\"/>"
+        }.joinToString("")
+        return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
           <sheets>
-            <sheet name="统计汇总" sheetId="1" r:id="rId1"/>
-            <sheet name="使用明细" sheetId="2" r:id="rId2"/>
+            $sheetNodes
           </sheets>
         </workbook>""".trimIndent()
+    }
 
-    private fun workbookRelationshipsXml() = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    private fun workbookRelationshipsXml(sheetCount: Int): String {
+        val worksheetRelationships = (1..sheetCount).joinToString("") { index ->
+            "<Relationship Id=\"rId$index\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet$index.xml\"/>"
+        }
+        return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-          <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
-          <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+          $worksheetRelationships
+          <Relationship Id="rId${sheetCount + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
         </Relationships>""".trimIndent()
+    }
 
     private fun stylesXml() = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
