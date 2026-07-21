@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/nurse_controller.dart';
+import '../features/education/controllers/education_session_controller.dart';
 import '../features/education/models/education_item.dart';
 import '../features/education/screens/bedside_education_screen.dart';
 import '../features/education/screens/education_playback_screen.dart';
@@ -205,6 +206,8 @@ class NurseScreen extends StatelessWidget {
     NurseController controller, {
     EducationItem? directItem,
   }) async {
+    EducationSessionController? session;
+    var routeTakenOwnership = false;
     try {
       final items =
           directItem == null
@@ -217,11 +220,13 @@ class NurseScreen extends StatelessWidget {
         ).showSnackBar(const SnackBar(content: Text('当前科室还没有可用的宣教内容')));
         return;
       }
-      final session = controller.createBedsideEducationSession();
-      await session.startSession(controller.config.offlineSpeechLanguage);
-      if (directItem != null) await session.selectItem(directItem);
+      final createdSession = controller.createBedsideEducationSession();
+      session = createdSession;
+      await createdSession.startSession(
+        controller.config.offlineSpeechLanguage,
+      );
+      if (directItem != null) await createdSession.selectItem(directItem);
       if (!context.mounted) {
-        await session.clearTransientState();
         return;
       }
       final palette = NursePalette.forStyle(controller.config.visualStyle);
@@ -229,7 +234,7 @@ class NurseScreen extends StatelessWidget {
           directItem == null
               ? BedsideEducationScreen(
                 items: items,
-                session: session,
+                session: createdSession,
                 departmentName: controller.config.wardName,
                 nurseAvatarPath: controller.config.nurseAvatarPath,
                 onOfflinePlaybackStarting:
@@ -242,7 +247,7 @@ class NurseScreen extends StatelessWidget {
                     ),
               )
               : EducationPlaybackScreen(
-                session: session,
+                session: createdSession,
                 speech: controller.localSpeechService,
                 departmentName: controller.config.wardName,
                 nurseAvatarPath: controller.config.nurseAvatarPath,
@@ -262,12 +267,21 @@ class NurseScreen extends StatelessWidget {
               (_) => Theme(data: palette.createTheme(), child: educationScreen),
         ),
       );
+      routeTakenOwnership = true;
     } catch (error) {
       if (!context.mounted) return;
       final target = directItem == null ? '宣教工作台' : '宣教';
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('$target暂时无法打开：$error')));
+    } finally {
+      if (session != null && !routeTakenOwnership) {
+        try {
+          await session.clearTransientState();
+        } catch (_) {
+          // Cleanup is best-effort if the local event store is also failing.
+        }
+      }
     }
   }
 }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:digital_nurse/controllers/nurse_controller.dart';
 import 'package:digital_nurse/features/education/models/education_language_content.dart';
 import 'package:digital_nurse/features/education/models/education_item.dart';
+import 'package:digital_nurse/features/education/models/education_session_event.dart';
 import 'package:digital_nurse/features/education/screens/education_playback_screen.dart';
 import 'package:digital_nurse/main.dart';
 import 'package:digital_nurse/models/nurse_app_config.dart';
@@ -96,6 +97,46 @@ void main() {
     expect(find.text('星标B'), findsOneWidget);
   });
 
+  testWidgets('刷新宣教库失败时清空星标缓存并显示旧版应急入口', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final educationRepository = _FailingRefreshEducationRepository();
+    await educationRepository.replaceAll([
+      _educationItem(id: 'stale-favorite', title: '过期星标宣教', favorite: true),
+    ]);
+    await educationRepository.markLegacyMigrationCompleted();
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(
+        NurseAppConfig.defaults(
+          'device',
+          'client',
+        ).copyWith(departmentConfigured: false),
+      ),
+      educationRepository: educationRepository,
+      educationEventRepository: FakeEducationEventRepository(),
+    );
+    await controller.initializeLocalState();
+    expect(controller.favoriteEducationItems, hasLength(1));
+
+    educationRepository.failLoads = true;
+    await expectLater(controller.loadActiveEducation(), throwsStateError);
+
+    expect(controller.educationFallbackActive, isTrue);
+    expect(controller.educationInitializationError, contains('宣教库加载失败'));
+    expect(controller.activeEducationItems, isEmpty);
+    expect(controller.favoriteEducationItems, isEmpty);
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: const DigitalNurseApp(home: NurseScreen()),
+      ),
+    );
+
+    expect(find.text('宣教库异常，已启用旧版应急宣教'), findsOneWidget);
+    expect(find.text('入院注意事项'), findsOneWidget);
+    expect(find.text('过期星标宣教'), findsNothing);
+  });
+
   testWidgets('首页星标宣教直接进入播放页并自动语音播放', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1024, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -136,6 +177,145 @@ void main() {
     );
     expect(playback.session.state.selectedItem, favorite);
     expect(speech.spoken, '直接播放宣教播报正文');
+  });
+
+  testWidgets('星标宣教选中事件保存失败时清理已创建会话', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final educationRepository = FakeEducationRepository();
+    await educationRepository.replaceAll([
+      _educationItem(
+        id: 'favorite-select-fails',
+        title: '故障宣教',
+        favorite: true,
+      ),
+    ]);
+    await educationRepository.markLegacyMigrationCompleted();
+    final events =
+        FakeEducationEventRepository()
+          ..failOnType = EducationEventType.itemSelected;
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(
+        NurseAppConfig.defaults(
+          'device',
+          'client',
+        ).copyWith(departmentConfigured: false),
+      ),
+      localSpeechService: _FakeLocalSpeechService(),
+      educationRepository: educationRepository,
+      educationEventRepository: events,
+    );
+    await controller.initializeLocalState();
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: const DigitalNurseApp(home: NurseScreen()),
+      ),
+    );
+
+    await tester.tap(find.text('故障宣教'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(EducationPlaybackScreen), findsNothing);
+    expect(
+      events.saved.map((event) => event.type),
+      contains(EducationEventType.sessionCleared),
+    );
+  });
+
+  testWidgets('星标宣教路由接管失败时清理已创建会话', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final educationRepository = FakeEducationRepository();
+    await educationRepository.replaceAll([
+      _educationItem(
+        id: 'favorite-route-fails',
+        title: '路由故障宣教',
+        favorite: true,
+      ),
+    ]);
+    await educationRepository.markLegacyMigrationCompleted();
+    final events = FakeEducationEventRepository();
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(
+        NurseAppConfig.defaults(
+          'device',
+          'client',
+        ).copyWith(departmentConfigured: false),
+      ),
+      localSpeechService: _FakeLocalSpeechService(),
+      educationRepository: educationRepository,
+      educationEventRepository: events,
+    );
+    await controller.initializeLocalState();
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          home: _ThrowingPushNavigator(child: const NurseScreen()),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('路由故障宣教'));
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      events.saved.map((event) => event.type),
+      contains(EducationEventType.sessionCleared),
+    );
+  });
+
+  testWidgets('星标宣教正常路由返回后不重复清理会话', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final educationRepository = FakeEducationRepository();
+    await educationRepository.replaceAll([
+      _educationItem(
+        id: 'favorite-normal-route',
+        title: '正常路由宣教',
+        favorite: true,
+      ),
+    ]);
+    await educationRepository.markLegacyMigrationCompleted();
+    final events = FakeEducationEventRepository();
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(
+        NurseAppConfig.defaults(
+          'device',
+          'client',
+        ).copyWith(departmentConfigured: false),
+      ),
+      localSpeechService: _FakeLocalSpeechService(),
+      educationRepository: educationRepository,
+      educationEventRepository: events,
+    );
+    await controller.initializeLocalState();
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: const DigitalNurseApp(home: NurseScreen()),
+      ),
+    );
+
+    await tester.tap(find.text('正常路由宣教'));
+    await tester.pump();
+    await tester.pump();
+    Navigator.of(
+      tester.element(find.byType(EducationPlaybackScreen)),
+    ).pop<void>();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+
+    expect(
+      events.saved.where(
+        (event) => event.type == EducationEventType.sessionCleared,
+      ),
+      hasLength(1),
+    );
   });
 
   testWidgets('首页星标宣教快速连点只打开一个播放路由', (tester) async {
@@ -435,6 +615,16 @@ class _FailingEducationRepository extends FakeEducationRepository {
   Future<bool> isLegacyMigrationCompleted() async => throw StateError('db');
 }
 
+class _FailingRefreshEducationRepository extends FakeEducationRepository {
+  bool failLoads = false;
+
+  @override
+  Future<List<EducationItem>> loadActive() {
+    if (failLoads) throw StateError('refresh failed');
+    return super.loadActive();
+  }
+}
+
 class _FakeLocalSpeechService extends LocalSpeechService {
   final _events = StreamController<LocalSpeechEvent>.broadcast(sync: true);
   String? spoken;
@@ -471,6 +661,23 @@ class _CountingNavigatorObserver extends NavigatorObserver {
     if (previousRoute != null) openedRoutes++;
     super.didPush(route, previousRoute);
   }
+}
+
+class _ThrowingPushNavigator extends Navigator {
+  _ThrowingPushNavigator({required Widget child})
+    : super(
+        onGenerateRoute:
+            (_) => MaterialPageRoute<void>(builder: (context) => child),
+      );
+
+  @override
+  NavigatorState createState() => _ThrowingPushNavigatorState();
+}
+
+class _ThrowingPushNavigatorState extends NavigatorState {
+  @override
+  Future<T?> push<T extends Object?>(Route<T> route) =>
+      Future<T?>.error(StateError('navigation failed'));
 }
 
 class _BlockingLoadEducationRepository extends FakeEducationRepository {

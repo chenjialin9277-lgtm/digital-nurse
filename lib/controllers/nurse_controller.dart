@@ -186,17 +186,18 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   Future<List<EducationItem>> loadActiveEducation() async {
     try {
       await _ensureEducationInitialized();
+      _activeEducationItems = List.unmodifiable(
+        await _educationRepository.loadActive(),
+      );
       educationInitializationError = null;
+      notifyListeners();
+      return _activeEducationItems;
     } catch (error) {
       educationInitializationError = '宣教库加载失败：$error';
+      _activeEducationItems = const [];
       notifyListeners();
       rethrow;
     }
-    _activeEducationItems = List.unmodifiable(
-      await _educationRepository.loadActive(),
-    );
-    notifyListeners();
-    return _activeEducationItems;
   }
 
   EducationSessionController createBedsideEducationSession() =>
