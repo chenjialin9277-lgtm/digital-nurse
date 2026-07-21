@@ -511,7 +511,7 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
       } catch (_) {
         // A failed stop must not prevent the online player restore attempt.
       } finally {
-        await _restoreOnlineAudio();
+        await _performOnlineAudioRestore();
       }
     }();
     _stopAndRestoreFuture = future;
@@ -523,7 +523,16 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
     return future;
   }
 
-  Future<void> _restoreOnlineAudio() {
+  Future<void> _restoreOnlineAudio() async {
+    final stopping = _stopAndRestoreFuture;
+    if (stopping != null) {
+      await stopping;
+      return;
+    }
+    await _performOnlineAudioRestore();
+  }
+
+  Future<void> _performOnlineAudioRestore() {
     final existing = _restoreFuture;
     if (existing != null) return existing;
     final future = () async {

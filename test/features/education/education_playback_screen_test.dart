@@ -150,6 +150,39 @@ void main() {
     expect(boundary.resumed, 1);
   });
 
+  testWidgets(
+    'exit during suspend still waits for offline stop before restore',
+    (tester) async {
+      final speech = _BlockingStopSpeechService();
+      final session = await _readySession();
+      final boundary = _BlockingSuspendAudioBoundaryCounter();
+      await tester.pumpWidget(
+        _playbackApp(
+          session,
+          speech,
+          autoStart: true,
+          onOfflinePlaybackStarting: boundary.suspend,
+          onOfflinePlaybackEnded: boundary.resume,
+        ),
+      );
+      await tester.pump();
+      expect(boundary.suspended, 1);
+      expect(speech.spoken, isNull);
+
+      await tester.tap(find.byTooltip('结束并返回'));
+      await tester.pump();
+      expect(speech.stopCount, 1);
+
+      boundary.releaseSuspend();
+      await tester.pump();
+      expect(boundary.resumed, 0);
+
+      speech.releaseStop();
+      await tester.pump();
+      expect(boundary.resumed, 1);
+    },
+  );
+
   testWidgets('background privacy clear restores online audio exactly once', (
     tester,
   ) async {
@@ -642,6 +675,18 @@ class _BlockingRestoreAudioBoundaryCounter extends _AudioBoundaryCounter {
   }
 
   void releaseRestore() => _firstRestore.complete();
+}
+
+class _BlockingSuspendAudioBoundaryCounter extends _AudioBoundaryCounter {
+  final _suspendCompleter = Completer<void>();
+
+  @override
+  Future<void> suspend() async {
+    suspended++;
+    await _suspendCompleter.future;
+  }
+
+  void releaseSuspend() => _suspendCompleter.complete();
 }
 
 class _BlockingStopSpeechService extends _FakeLocalSpeechService {
