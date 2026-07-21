@@ -8,6 +8,7 @@ import 'package:digital_nurse/features/education/screens/education_playback_scre
 import 'package:digital_nurse/models/offline_speech_language.dart';
 import 'package:digital_nurse/services/local_speech_service.dart';
 import 'package:digital_nurse/theme/nurse_theme.dart';
+import 'package:digital_nurse/widgets/nurse_avatar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -15,6 +16,272 @@ import 'education_test_fixtures.dart';
 import 'fake_education_event_repository.dart';
 
 void main() {
+  testWidgets(
+    'auto-start playback keeps avatar and replaces captions with question',
+    (tester) async {
+      final speech = _FakeLocalSpeechService();
+      final session = await _readySession();
+      final boundary = _AudioBoundaryCounter();
+
+      await tester.pumpWidget(
+        _playbackApp(
+          session,
+          speech,
+          autoStart: true,
+          onOfflinePlaybackStarting: boundary.suspend,
+          onOfflinePlaybackEnded: boundary.resume,
+        ),
+      );
+      await tester.pump();
+
+      expect(find.byType(NurseAvatar), findsOneWidget);
+      expect(speech.spoken, isNotNull);
+      expect(speech.speakCount, 1);
+      expect(boundary.suspended, 1);
+      await tester.pump();
+      expect(speech.speakCount, 1);
+      expect(boundary.suspended, 1);
+
+      speech.complete();
+      await tester.pump();
+      final question =
+          reviewedItem.contentFor(OfflineSpeechLanguage.mandarin).question;
+      expect(find.text(question), findsOneWidget);
+      expect(find.byType(NurseAvatar), findsOneWidget);
+      expect(boundary.resumed, 1);
+    },
+  );
+
+  testWidgets('speech error restores online audio exactly once', (
+    tester,
+  ) async {
+    final speech = _FakeLocalSpeechService();
+    final session = await _readySession();
+    final boundary = _AudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+
+    speech.fail();
+    speech.fail();
+    await tester.pump();
+
+    expect(boundary.suspended, 1);
+    expect(boundary.resumed, 1);
+    expect(session.state.stage, EducationSessionStage.question);
+  });
+
+  testWidgets('speak exception restores online audio exactly once', (
+    tester,
+  ) async {
+    final speech = _ThrowingSpeechService();
+    final session = await _readySession();
+    final boundary = _AudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+
+    expect(boundary.suspended, 1);
+    expect(boundary.resumed, 1);
+    expect(session.state.stage, EducationSessionStage.question);
+  });
+
+  testWidgets('back restores online audio exactly once', (tester) async {
+    final speech = _FakeLocalSpeechService();
+    final session = await _readySession();
+    final boundary = _AudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('结束并返回'));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    expect(boundary.suspended, 1);
+    expect(boundary.resumed, 1);
+  });
+
+  testWidgets('back waits for offline stop before restoring online audio', (
+    tester,
+  ) async {
+    final speech = _BlockingStopSpeechService();
+    final session = await _readySession();
+    final boundary = _AudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('结束并返回'));
+    await tester.pump();
+    expect(boundary.resumed, 0);
+
+    speech.releaseStop();
+    await tester.pump();
+    expect(boundary.resumed, 1);
+  });
+
+  testWidgets('background privacy clear restores online audio exactly once', (
+    tester,
+  ) async {
+    final speech = _FakeLocalSpeechService();
+    final session = await _readySession();
+    final boundary = _AudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.detached);
+    await tester.pump();
+
+    expect(boundary.suspended, 1);
+    expect(boundary.resumed, 1);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  });
+
+  testWidgets('timeout restores online audio exactly once', (tester) async {
+    final speech = _FakeLocalSpeechService();
+    final session = await _readySession();
+    final boundary = _AudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        inactivityDuration: const Duration(seconds: 5),
+        warningDuration: const Duration(seconds: 2),
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pump();
+
+    expect(boundary.suspended, 1);
+    expect(boundary.resumed, 1);
+  });
+
+  testWidgets('dispose restores online audio exactly once', (tester) async {
+    final speech = _FakeLocalSpeechService();
+    final session = await _readySession();
+    final boundary = _AudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+
+    expect(boundary.suspended, 1);
+    expect(boundary.resumed, 1);
+  });
+
+  testWidgets('dispose waits for offline stop before restoring online audio', (
+    tester,
+  ) async {
+    final speech = _BlockingStopSpeechService();
+    final session = await _readySession();
+    final boundary = _AudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(boundary.resumed, 0);
+
+    speech.releaseStop();
+    await tester.pump();
+    expect(boundary.resumed, 1);
+  });
+
+  testWidgets('replay waits for prior restore and balances a new boundary', (
+    tester,
+  ) async {
+    final speech = _FakeLocalSpeechService();
+    final session = await _readySession();
+    final boundary = _BlockingRestoreAudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+    speech.complete();
+    await tester.pump();
+
+    await tester.tap(find.text('重新听一遍'));
+    await tester.pump();
+    expect(boundary.suspended, 1);
+    expect(boundary.resumed, 1);
+    boundary.releaseRestore();
+    await tester.pump();
+    expect(boundary.suspended, 2);
+
+    speech.complete();
+    speech.complete();
+    await tester.pump();
+    expect(boundary.resumed, 2);
+  });
+
   testWidgets('播放结束后进入理解题，答错后中性提示并可清屏', (tester) async {
     final speech = _FakeLocalSpeechService();
     final session = await _readySession();
@@ -34,6 +301,7 @@ void main() {
     await tester.pump();
     expect(find.text('我们再看一下重点'), findsOneWidget);
     expect(find.text('重新听一遍'), findsOneWidget);
+    expect(find.byType(NurseAvatar), findsOneWidget);
 
     await tester.tap(find.text('结束本次宣教'));
     await tester.pump();
@@ -288,12 +556,19 @@ Widget _playbackApp(
   LocalSpeechService speech, {
   Duration inactivityDuration = const Duration(minutes: 5),
   Duration warningDuration = const Duration(seconds: 30),
+  bool autoStart = false,
+  Future<void> Function()? onOfflinePlaybackStarting,
+  Future<void> Function()? onOfflinePlaybackEnded,
 }) => MaterialApp(
   theme: NursePalette.forStyle(NurseVisualStyle.clinicalLight).createTheme(),
   home: EducationPlaybackScreen(
     session: session,
     speech: speech,
     departmentName: '急诊病房',
+    nurseAvatarPath: '',
+    autoStart: autoStart,
+    onOfflinePlaybackStarting: onOfflinePlaybackStarting,
+    onOfflinePlaybackEnded: onOfflinePlaybackEnded,
     inactivityDuration: inactivityDuration,
     warningDuration: warningDuration,
   ),
@@ -307,6 +582,7 @@ class _FakeLocalSpeechService extends LocalSpeechService {
   String? spoken;
   OfflineSpeechLanguage? spokenLanguage;
   int stopCount = 0;
+  int speakCount = 0;
   final Duration playbackDuration;
 
   @override
@@ -320,6 +596,7 @@ class _FakeLocalSpeechService extends LocalSpeechService {
     String text, {
     OfflineSpeechLanguage language = OfflineSpeechLanguage.mandarin,
   }) async {
+    speakCount++;
     spoken = text;
     spokenLanguage = language;
     _durations.add(playbackDuration);
@@ -332,6 +609,39 @@ class _FakeLocalSpeechService extends LocalSpeechService {
   }
 
   void complete() => _events.add(LocalSpeechEvent.completed);
+
+  void fail() => _events.add(LocalSpeechEvent.error);
+}
+
+class _ThrowingSpeechService extends _FakeLocalSpeechService {
+  @override
+  Future<void> speak(
+    String text, {
+    OfflineSpeechLanguage language = OfflineSpeechLanguage.mandarin,
+  }) async {
+    throw StateError('synthetic speech failure');
+  }
+}
+
+class _AudioBoundaryCounter {
+  int suspended = 0;
+  int resumed = 0;
+
+  Future<void> suspend() async => suspended++;
+
+  Future<void> resume() async => resumed++;
+}
+
+class _BlockingRestoreAudioBoundaryCounter extends _AudioBoundaryCounter {
+  final _firstRestore = Completer<void>();
+
+  @override
+  Future<void> resume() async {
+    resumed++;
+    if (resumed == 1) await _firstRestore.future;
+  }
+
+  void releaseRestore() => _firstRestore.complete();
 }
 
 class _BlockingStopSpeechService extends _FakeLocalSpeechService {

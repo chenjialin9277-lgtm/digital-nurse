@@ -5,9 +5,11 @@ import 'package:digital_nurse/features/education/data/education_event_repository
 import 'package:digital_nurse/features/education/models/education_item.dart';
 import 'package:digital_nurse/features/education/models/education_session_event.dart';
 import 'package:digital_nurse/features/education/screens/bedside_education_screen.dart';
+import 'package:digital_nurse/features/education/screens/education_playback_screen.dart';
 import 'package:digital_nurse/features/education/widgets/daily_language_selector.dart';
 import 'package:digital_nurse/models/offline_speech_language.dart';
 import 'package:digital_nurse/theme/nurse_theme.dart';
+import 'package:digital_nurse/widgets/nurse_avatar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -151,6 +153,41 @@ void main() {
     expect(find.text('开始宣教'), findsOneWidget);
     expect(harness.session.state.selectedItem?.id, reviewedItem.id);
     expect(harness.session.state.stage, EducationSessionStage.ready);
+  });
+
+  testWidgets('工作台向播放页透传数字护士和音频边界', (tester) async {
+    final session = EducationSessionController(
+      events: FakeEducationEventRepository(),
+      departmentId: 'emergency_ward',
+    );
+    await session.startSession(OfflineSpeechLanguage.mandarin);
+    Future<void> onStarting() async {}
+    Future<void> onEnded() async {}
+
+    await tester.pumpWidget(
+      _testApp(
+        BedsideEducationScreen(
+          items: [reviewedItem],
+          session: session,
+          departmentName: '急诊病房',
+          nurseAvatarPath: '/tmp/department-nurse.png',
+          onOfflinePlaybackStarting: onStarting,
+          onOfflinePlaybackEnded: onEnded,
+        ),
+      ),
+    );
+    await tester.tap(find.text('入院注意事项'));
+    await tester.pumpAndSettle();
+
+    final playback = tester.widget<EducationPlaybackScreen>(
+      find.byType(EducationPlaybackScreen),
+    );
+    expect(playback.nurseAvatarPath, '/tmp/department-nurse.png');
+    expect(playback.onOfflinePlaybackStarting, same(onStarting));
+    expect(playback.onOfflinePlaybackEnded, same(onEnded));
+    final avatar = tester.widget<NurseAvatar>(find.byType(NurseAvatar));
+    expect(avatar.imagePath, '/tmp/department-nurse.png');
+    expect(avatar.motionEnabled, isFalse);
   });
 
   testWidgets('搜索、分类和常用筛选可用', (tester) async {

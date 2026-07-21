@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../controllers/nurse_controller.dart';
 import '../../../models/offline_speech_language.dart';
 import '../../../services/local_speech_service.dart';
 import '../../../theme/nurse_theme.dart';
+import '../../../widgets/nurse_avatar.dart';
 import '../controllers/education_session_controller.dart';
 import '../models/education_language_content.dart';
 import '../widgets/comprehension_card.dart';
@@ -17,6 +19,10 @@ class EducationPlaybackScreen extends StatefulWidget {
     required this.session,
     required this.speech,
     required this.departmentName,
+    this.nurseAvatarPath = '',
+    this.autoStart = false,
+    this.onOfflinePlaybackStarting,
+    this.onOfflinePlaybackEnded,
     this.onLanguageChanged,
     this.inactivityDuration = const Duration(minutes: 5),
     this.warningDuration = const Duration(seconds: 30),
@@ -25,6 +31,10 @@ class EducationPlaybackScreen extends StatefulWidget {
   final EducationSessionController session;
   final LocalSpeechService speech;
   final String departmentName;
+  final String nurseAvatarPath;
+  final bool autoStart;
+  final Future<void> Function()? onOfflinePlaybackStarting;
+  final Future<void> Function()? onOfflinePlaybackEnded;
   final ValueChanged<OfflineSpeechLanguage>? onLanguageChanged;
   final Duration inactivityDuration;
   final Duration warningDuration;
@@ -49,6 +59,10 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
   bool _showInactivityWarning = false;
   int _operationGeneration = 0;
   bool _replaying = false;
+  bool _offlinePlaybackActive = false;
+  Future<void>? _suspendFuture;
+  Future<void>? _restoreFuture;
+  Future<void>? _stopAndRestoreFuture;
   final ScrollController _captionScrollController = ScrollController();
 
   @override
@@ -61,6 +75,11 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
       _handlePlaybackDuration,
     );
     _resetInactivityTimer();
+    if (widget.autoStart) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_startPlayback());
+      });
+    }
   }
 
   @override
@@ -82,8 +101,10 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
     _captionScrollController.dispose();
     _cancelTimers();
     if (!_finished) {
-      unawaited(widget.speech.stop());
       unawaited(widget.session.clearTransientState());
+      unawaited(_stopOfflinePlaybackAndRestore());
+    } else if (_stopAndRestoreFuture == null) {
+      unawaited(_restoreOnlineAudio());
     }
     super.dispose();
   }
@@ -170,7 +191,9 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
                     Expanded(
                       child: LayoutBuilder(
                         builder: (context, constraints) {
-                          final wide = constraints.maxWidth >= 760;
+                          final compact =
+                              constraints.maxWidth < 1200 ||
+                              constraints.maxHeight < 720;
                           final introduction = _EducationIntroduction(
                             title: content.title,
                             summary: content.summary,
@@ -180,23 +203,31 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
                             playing: playing,
                             scrollController: _captionScrollController,
                             onStart: _startPlayback,
+                            compact: compact,
                           );
-                          final stage = _buildStage(state, content);
-                          return wide
-                              ? Row(
-                                children: [
-                                  Expanded(flex: 11, child: introduction),
-                                  const SizedBox(width: 14),
-                                  Expanded(flex: 9, child: stage),
-                                ],
-                              )
-                              : Column(
-                                children: [
-                                  Expanded(flex: 10, child: introduction),
-                                  const SizedBox(height: 10),
-                                  Expanded(flex: 9, child: stage),
-                                ],
-                              );
+                          final stage = switch (state.stage) {
+                            EducationSessionStage.ready ||
+                            EducationSessionStage.playing => introduction,
+                            _ => _buildStage(state, content),
+                          };
+                          return Row(
+                            children: [
+                              Expanded(
+                                flex: 8,
+                                child: _NurseStageCard(
+                                  state:
+                                      playing
+                                          ? NurseUiState.speaking
+                                          : NurseUiState.idle,
+                                  imagePath: widget.nurseAvatarPath,
+                                  departmentName: widget.departmentName,
+                                  compact: compact,
+                                ),
+                              ),
+                              SizedBox(width: compact ? 10 : 16),
+                              Expanded(flex: 12, child: stage),
+                            ],
+                          );
                         },
                       ),
                     ),
@@ -215,8 +246,8 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
     EducationLanguageContent content,
   ) {
     return switch (state.stage) {
-      EducationSessionStage.ready => _ReadyCard(onStart: _startPlayback),
-      EducationSessionStage.playing => const _PlayingCard(),
+      EducationSessionStage.ready ||
+      EducationSessionStage.playing => const SizedBox.shrink(),
       EducationSessionStage.question => ComprehensionCard(
         content: content,
         onAnswer: (index) {
@@ -255,13 +286,23 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
         widget.session.state.stage != EducationSessionStage.playing) {
       return;
     }
+    var speechStarted = false;
     try {
+      await _suspendOnlineAudio();
+      if (_finished ||
+          !mounted ||
+          widget.session.state.stage != EducationSessionStage.playing) {
+        return;
+      }
       await widget.speech.speak(body, language: state.language);
+      speechStarted = true;
     } catch (_) {
       if (widget.session.state.stage == EducationSessionStage.playing) {
         widget.session.updateVisibleCaption(body);
         await widget.session.markSpeechComplete();
       }
+    } finally {
+      if (!speechStarted) await _restoreOnlineAudio();
     }
   }
 
@@ -310,13 +351,17 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
 
   Future<void> _completePlayback() async {
     _captionTimer?.cancel();
-    if (widget.session.state.stage != EducationSessionStage.playing) return;
-    final state = widget.session.state;
-    final body = state.selectedItem!.contentFor(state.language).body;
-    widget.session.updateVisibleCaption(body);
-    _followCaption();
-    await widget.session.markSpeechComplete();
-    _resetInactivityTimer();
+    try {
+      if (widget.session.state.stage != EducationSessionStage.playing) return;
+      final state = widget.session.state;
+      final body = state.selectedItem!.contentFor(state.language).body;
+      widget.session.updateVisibleCaption(body);
+      _followCaption();
+      await widget.session.markSpeechComplete();
+      _resetInactivityTimer();
+    } finally {
+      await _restoreOnlineAudio();
+    }
   }
 
   Future<void> _replay() async {
@@ -406,8 +451,7 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
         clearOnly
             ? widget.session.clearTransientState()
             : widget.session.finishSession();
-    final stopFuture = widget.speech.stop();
-    await Future.wait([clearFuture, stopFuture]);
+    await Future.wait([clearFuture, _stopOfflinePlaybackAndRestore()]);
     if (mounted) setState(() {});
   }
 
@@ -417,8 +461,7 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
     _operationGeneration++;
     _cancelTimers();
     final clearFuture = widget.session.clearTransientState();
-    final stopFuture = widget.speech.stop();
-    await Future.wait([clearFuture, stopFuture]);
+    await Future.wait([clearFuture, _stopOfflinePlaybackAndRestore()]);
     if (mounted) setState(() {});
   }
 
@@ -436,6 +479,106 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
       );
     });
   }
+
+  Future<void> _suspendOnlineAudio() async {
+    await _restoreFuture;
+    if (_offlinePlaybackActive) return;
+    final existing = _suspendFuture;
+    if (existing != null) return existing;
+    _offlinePlaybackActive = true;
+    final future = () async {
+      try {
+        await widget.onOfflinePlaybackStarting?.call();
+      } catch (_) {
+        _offlinePlaybackActive = false;
+        rethrow;
+      }
+    }();
+    _suspendFuture = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_suspendFuture, future)) _suspendFuture = null;
+    }
+  }
+
+  Future<void> _stopOfflinePlaybackAndRestore() {
+    final existing = _stopAndRestoreFuture;
+    if (existing != null) return existing;
+    final future = () async {
+      try {
+        await widget.speech.stop();
+      } catch (_) {
+        // A failed stop must not prevent the online player restore attempt.
+      } finally {
+        await _restoreOnlineAudio();
+      }
+    }();
+    _stopAndRestoreFuture = future;
+    future.whenComplete(() {
+      if (identical(_stopAndRestoreFuture, future)) {
+        _stopAndRestoreFuture = null;
+      }
+    });
+    return future;
+  }
+
+  Future<void> _restoreOnlineAudio() {
+    final existing = _restoreFuture;
+    if (existing != null) return existing;
+    final future = () async {
+      final suspending = _suspendFuture;
+      if (suspending != null) {
+        try {
+          await suspending;
+        } catch (_) {
+          return;
+        }
+      }
+      if (!_offlinePlaybackActive) return;
+      _offlinePlaybackActive = false;
+      try {
+        await widget.onOfflinePlaybackEnded?.call();
+      } catch (_) {
+        // Restoring online playback must never prevent privacy clearing.
+      }
+    }();
+    _restoreFuture = future;
+    future.whenComplete(() {
+      if (identical(_restoreFuture, future)) _restoreFuture = null;
+    });
+    return future;
+  }
+}
+
+class _NurseStageCard extends StatelessWidget {
+  const _NurseStageCard({
+    required this.state,
+    required this.imagePath,
+    required this.departmentName,
+    required this.compact,
+  });
+
+  final NurseUiState state;
+  final String imagePath;
+  final String departmentName;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    margin: EdgeInsets.zero,
+    clipBehavior: Clip.antiAlias,
+    child: Padding(
+      padding: EdgeInsets.all(compact ? 6 : 10),
+      child: NurseAvatar(
+        state: state,
+        emotion: 'neutral',
+        imagePath: imagePath,
+        departmentName: departmentName,
+        motionEnabled: false,
+      ),
+    ),
+  );
 }
 
 class _PlaybackHeader extends StatelessWidget {
@@ -512,6 +655,7 @@ class _EducationIntroduction extends StatelessWidget {
     required this.playing,
     required this.scrollController,
     required this.onStart,
+    required this.compact,
   });
 
   final String title;
@@ -522,19 +666,23 @@ class _EducationIntroduction extends StatelessWidget {
   final bool playing;
   final ScrollController scrollController;
   final VoidCallback onStart;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(compact ? 12 : 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
               title,
-              style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900),
+              style: TextStyle(
+                fontSize: compact ? 21 : 25,
+                fontWeight: FontWeight.w900,
+              ),
             ),
             const SizedBox(height: 6),
             Text('$category · 护士人工宣教约 $minutes 分钟'),
@@ -571,73 +719,31 @@ class _EducationIntroduction extends StatelessWidget {
                             : '点击“开始播放”后，语音和字幕将同步进行。'
                         : visibleCaption,
                     style: const TextStyle(
-                      fontSize: 21,
-                      height: 1.65,
+                      fontSize: 20,
+                      height: 1.5,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
               ),
             ),
+            if (!playing) ...[
+              SizedBox(height: compact ? 8 : 12),
+              const Text(
+                '开始宣教',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 6),
+              FilledButton.icon(
+                onPressed: onStart,
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('开始播放'),
+              ),
+            ],
           ],
         ),
       ),
     );
   }
-}
-
-class _ReadyCard extends StatelessWidget {
-  const _ReadyCard({required this.onStart});
-  final VoidCallback onStart;
-
-  @override
-  Widget build(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    child: Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.record_voice_over_outlined, size: 48),
-          const SizedBox(height: 10),
-          const Text(
-            '开始宣教',
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            onPressed: onStart,
-            icon: const Icon(Icons.play_arrow, size: 28),
-            label: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text('开始播放', style: TextStyle(fontSize: 20)),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
-}
-
-class _PlayingCard extends StatelessWidget {
-  const _PlayingCard();
-
-  @override
-  Widget build(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    child: const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          CircularProgressIndicator(),
-          SizedBox(height: 16),
-          Text(
-            '正在播放宣教内容',
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
-          ),
-          SizedBox(height: 6),
-          Text('请您仔细聆听，播放完成后将进行要点确认'),
-        ],
-      ),
-    ),
-  );
 }

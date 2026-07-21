@@ -15,12 +15,18 @@ class BedsideEducationScreen extends StatefulWidget {
     required this.items,
     required this.session,
     required this.departmentName,
+    this.nurseAvatarPath = '',
+    this.onOfflinePlaybackStarting,
+    this.onOfflinePlaybackEnded,
     this.onLanguageChanged,
   });
 
   final List<EducationItem> items;
   final EducationSessionController session;
   final String departmentName;
+  final String nurseAvatarPath;
+  final Future<void> Function()? onOfflinePlaybackStarting;
+  final Future<void> Function()? onOfflinePlaybackEnded;
   final ValueChanged<OfflineSpeechLanguage>? onLanguageChanged;
 
   @override
@@ -170,6 +176,9 @@ class _BedsideEducationScreenState extends State<BedsideEducationScreen> {
                   session: widget.session,
                   speech: const LocalSpeechService(),
                   departmentName: widget.departmentName,
+                  nurseAvatarPath: widget.nurseAvatarPath,
+                  onOfflinePlaybackStarting: widget.onOfflinePlaybackStarting,
+                  onOfflinePlaybackEnded: widget.onOfflinePlaybackEnded,
                   onLanguageChanged: (language) {
                     if (mounted) setState(() => _language = language);
                     widget.onLanguageChanged?.call(language);
