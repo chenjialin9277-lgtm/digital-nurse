@@ -1,11 +1,15 @@
 import 'dart:async';
 
 import 'package:digital_nurse/controllers/nurse_controller.dart';
+import 'package:digital_nurse/features/education/models/education_language_content.dart';
 import 'package:digital_nurse/features/education/models/education_item.dart';
+import 'package:digital_nurse/features/education/screens/education_playback_screen.dart';
 import 'package:digital_nurse/main.dart';
 import 'package:digital_nurse/models/nurse_app_config.dart';
+import 'package:digital_nurse/models/offline_speech_language.dart';
 import 'package:digital_nurse/repositories/nurse_config_repository.dart';
 import 'package:digital_nurse/screens/nurse_screen.dart';
+import 'package:digital_nurse/services/local_speech_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -14,6 +18,214 @@ import 'fake_education_event_repository.dart';
 import 'fake_education_repository.dart';
 
 void main() {
+  testWidgets('首页只展示管理员星标宣教并保留更多宣教入口', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final educationRepository = FakeEducationRepository();
+    await educationRepository.replaceAll([
+      _educationItem(id: 'favorite', title: '标星宣教', favorite: true),
+      _educationItem(id: 'ordinary', title: '未标星宣教', favorite: false),
+    ]);
+    await educationRepository.markLegacyMigrationCompleted();
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(
+        NurseAppConfig.defaults(
+          'device',
+          'client',
+        ).copyWith(departmentConfigured: false),
+      ),
+      educationRepository: educationRepository,
+      educationEventRepository: FakeEducationEventRepository(),
+    );
+    await controller.initializeLocalState();
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: const DigitalNurseApp(home: NurseScreen()),
+      ),
+    );
+
+    expect(find.text('标星宣教'), findsOneWidget);
+    expect(find.text('未标星宣教'), findsNothing);
+    expect(find.text('更多宣教'), findsOneWidget);
+  });
+
+  testWidgets('设置关闭后刷新星标宣教缓存并立即更新首页', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final educationRepository = FakeEducationRepository();
+    final itemA = _educationItem(
+      id: 'favorite-a',
+      title: '星标A',
+      favorite: true,
+    );
+    final itemB = _educationItem(
+      id: 'favorite-b',
+      title: '星标B',
+      favorite: false,
+    );
+    await educationRepository.replaceAll([itemA, itemB]);
+    await educationRepository.markLegacyMigrationCompleted();
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(
+        NurseAppConfig.defaults(
+          'device',
+          'client',
+        ).copyWith(departmentConfigured: false),
+      ),
+      educationRepository: educationRepository,
+      educationEventRepository: FakeEducationEventRepository(),
+    );
+    await controller.initializeLocalState();
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: const DigitalNurseApp(home: NurseScreen()),
+      ),
+    );
+    expect(find.text('星标A'), findsOneWidget);
+    expect(find.text('星标B'), findsNothing);
+
+    await educationRepository.save(itemA.copyWith(favorite: false));
+    await educationRepository.save(itemB.copyWith(favorite: true));
+    await controller.loadActiveEducation();
+    await tester.pump();
+
+    expect(find.text('星标A'), findsNothing);
+    expect(find.text('星标B'), findsOneWidget);
+  });
+
+  testWidgets('首页星标宣教直接进入播放页并自动语音播放', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final educationRepository = FakeEducationRepository();
+    final favorite = _educationItem(
+      id: 'favorite-direct',
+      title: '直接播放宣教',
+      favorite: true,
+    );
+    await educationRepository.replaceAll([favorite]);
+    await educationRepository.markLegacyMigrationCompleted();
+    final speech = _FakeLocalSpeechService();
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(
+        NurseAppConfig.defaults(
+          'device',
+          'client',
+        ).copyWith(departmentConfigured: false),
+      ),
+      localSpeechService: speech,
+      educationRepository: educationRepository,
+      educationEventRepository: FakeEducationEventRepository(),
+    );
+    await controller.initializeLocalState();
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: const DigitalNurseApp(home: NurseScreen()),
+      ),
+    );
+
+    await tester.tap(find.text('直接播放宣教'));
+    await tester.pump();
+    await tester.pump();
+
+    final playback = tester.widget<EducationPlaybackScreen>(
+      find.byType(EducationPlaybackScreen),
+    );
+    expect(playback.session.state.selectedItem, favorite);
+    expect(speech.spoken, '直接播放宣教播报正文');
+  });
+
+  testWidgets('首页星标宣教快速连点只打开一个播放路由', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final educationRepository = FakeEducationRepository();
+    await educationRepository.replaceAll([
+      _educationItem(id: 'favorite-once', title: '防连点宣教', favorite: true),
+    ]);
+    await educationRepository.markLegacyMigrationCompleted();
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(
+        NurseAppConfig.defaults(
+          'device',
+          'client',
+        ).copyWith(departmentConfigured: false),
+      ),
+      localSpeechService: _FakeLocalSpeechService(),
+      educationRepository: educationRepository,
+      educationEventRepository: FakeEducationEventRepository(),
+    );
+    await controller.initializeLocalState();
+    final observer = _CountingNavigatorObserver();
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          navigatorObservers: [observer],
+          home: const NurseScreen(),
+        ),
+      ),
+    );
+
+    final favoriteButton = find.byKey(
+      const ValueKey('favorite-education-favorite-once'),
+    );
+    final button = tester.widget<OutlinedButton>(favoriteButton);
+    button.onPressed!.call();
+    button.onPressed!.call();
+    await tester.pump();
+    await tester.pump();
+
+    expect(observer.openedRoutes, 1);
+  });
+
+  testWidgets('首页星标宣教在目标语言未发布时明确禁用', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1024, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final educationRepository = FakeEducationRepository();
+    await educationRepository.replaceAll([
+      _educationItem(
+        id: 'favorite-unavailable',
+        title: '未发布语言宣教',
+        favorite: true,
+      ),
+    ]);
+    await educationRepository.markLegacyMigrationCompleted();
+    final controller = NurseController(
+      repository: _FakeNurseConfigRepository(
+        NurseAppConfig.defaults(
+          'device',
+          'client',
+        ).copyWith(departmentConfigured: false),
+      ),
+      localSpeechService: _FakeLocalSpeechService(),
+      educationRepository: educationRepository,
+      educationEventRepository: FakeEducationEventRepository(),
+    );
+    await controller.initializeLocalState();
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: const DigitalNurseApp(home: NurseScreen()),
+      ),
+    );
+
+    await tester.tap(find.text('English'));
+    await tester.pump();
+
+    expect(
+      controller.config.offlineSpeechLanguage,
+      OfflineSpeechLanguage.english,
+    );
+    expect(find.text('该语言暂未提供'), findsOneWidget);
+    final button = tester.widget<OutlinedButton>(
+      find.byKey(const ValueKey('favorite-education-favorite-unavailable')),
+    );
+    expect(button.onPressed, isNull);
+  });
+
   testWidgets('旧版自定义宣教启动时无损迁移并可进入床旁工作台', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1024, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -53,7 +265,7 @@ void main() {
         child: const DigitalNurseApp(home: NurseScreen()),
       ),
     );
-    await tester.tap(find.text('开始床旁宣教'));
+    await tester.tap(find.text('更多宣教'));
     await tester.pumpAndSettle();
 
     expect(find.text('旧版自定义宣教'), findsOneWidget);
@@ -75,6 +287,7 @@ void main() {
       educationEventRepository: FakeEducationEventRepository(),
     );
     await controller.initialize();
+    educationRepository.blockNextLoad();
 
     await tester.pumpWidget(
       ChangeNotifierProvider.value(
@@ -82,7 +295,7 @@ void main() {
         child: const DigitalNurseApp(home: NurseScreen()),
       ),
     );
-    final launch = find.text('开始床旁宣教');
+    final launch = find.text('更多宣教');
     await tester.tap(launch);
     await tester.tap(launch);
     await tester.pump();
@@ -152,9 +365,41 @@ void main() {
 
     expect(find.text('宣教库异常，已启用旧版应急宣教'), findsOneWidget);
     expect(find.text('入院注意事项'), findsOneWidget);
-    expect(find.text('开始床旁宣教'), findsNothing);
+    expect(find.text('更多宣教'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+}
+
+EducationItem _educationItem({
+  required String id,
+  required String title,
+  required bool favorite,
+}) {
+  final now = DateTime.utc(2026, 7, 21);
+  return EducationItem(
+    id: id,
+    category: '入院宣教',
+    contents: {
+      OfflineSpeechLanguage.mandarin: EducationLanguageContent(
+        title: title,
+        body: '$title播报正文',
+        summary: '$title摘要',
+        question: '是否理解？',
+        options: const ['是', '否'],
+        correctIndex: 0,
+        explanation: '已理解',
+        published: true,
+        needsReview: false,
+      ),
+    },
+    estimatedManualMinutes: 1,
+    sortOrder: id == 'favorite' ? 0 : 1,
+    favorite: favorite,
+    enabled: true,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+  );
 }
 
 class _FakeNurseConfigRepository extends NurseConfigRepository {
@@ -190,9 +435,53 @@ class _FailingEducationRepository extends FakeEducationRepository {
   Future<bool> isLegacyMigrationCompleted() async => throw StateError('db');
 }
 
+class _FakeLocalSpeechService extends LocalSpeechService {
+  final _events = StreamController<LocalSpeechEvent>.broadcast(sync: true);
+  String? spoken;
+
+  @override
+  Stream<LocalSpeechEvent> get events => _events.stream;
+
+  @override
+  Stream<Duration> get playbackDurations => const Stream.empty();
+
+  @override
+  Future<void> prepare([
+    OfflineSpeechLanguage language = OfflineSpeechLanguage.mandarin,
+  ]) async {}
+
+  @override
+  Future<void> speak(
+    String text, {
+    OfflineSpeechLanguage language = OfflineSpeechLanguage.mandarin,
+  }) async {
+    spoken = text;
+    _events.add(LocalSpeechEvent.started);
+  }
+
+  @override
+  Future<void> stop() async {}
+}
+
+class _CountingNavigatorObserver extends NavigatorObserver {
+  int openedRoutes = 0;
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    if (previousRoute != null) openedRoutes++;
+    super.didPush(route, previousRoute);
+  }
+}
+
 class _BlockingLoadEducationRepository extends FakeEducationRepository {
   final _loadCompleter = Completer<void>();
   int loadCalls = 0;
+  bool _blocking = false;
+
+  void blockNextLoad() {
+    _blocking = true;
+    loadCalls = 0;
+  }
 
   void release() {
     if (!_loadCompleter.isCompleted) _loadCompleter.complete();
@@ -200,6 +489,7 @@ class _BlockingLoadEducationRepository extends FakeEducationRepository {
 
   @override
   Future<List<EducationItem>> loadActive() async {
+    if (!_blocking) return super.loadActive();
     loadCalls++;
     await _loadCompleter.future;
     return super.loadActive();

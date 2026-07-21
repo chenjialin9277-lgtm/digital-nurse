@@ -79,6 +79,7 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   final List<int> _captionTarget = [];
   int _captionVisibleCount = 0;
   int _currentSentenceEnd = 0;
+  List<EducationItem> _activeEducationItems = const [];
   NurseAppConfig config = NurseAppConfig.defaults('', '');
 
   NurseUiState state = NurseUiState.connecting;
@@ -92,6 +93,10 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   bool isPressingToTalk = false;
 
   bool get educationFallbackActive => educationInitializationError != null;
+  List<EducationItem> get activeEducationItems => _activeEducationItems;
+  List<EducationItem> get favoriteEducationItems =>
+      List.unmodifiable(_activeEducationItems.where((item) => item.favorite));
+  LocalSpeechService get localSpeechService => _localSpeech;
 
   Future<void> initializeLocalState() {
     final existing = _localStateInitialization;
@@ -128,6 +133,9 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
     }
     try {
       await _ensureEducationInitialized();
+      _activeEducationItems = List.unmodifiable(
+        await _educationRepository.loadActive(),
+      );
       educationInitializationError = null;
     } catch (error) {
       // 宣教库异常不阻断小智问答，首页保留旧版固定宣教作为应急入口。
@@ -184,7 +192,11 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       rethrow;
     }
-    return _educationRepository.loadActive();
+    _activeEducationItems = List.unmodifiable(
+      await _educationRepository.loadActive(),
+    );
+    notifyListeners();
+    return _activeEducationItems;
   }
 
   EducationSessionController createBedsideEducationSession() =>

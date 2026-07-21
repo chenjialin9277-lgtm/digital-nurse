@@ -5,9 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/nurse_controller.dart';
+import '../features/education/models/education_item.dart';
 import '../features/education/screens/bedside_education_screen.dart';
+import '../features/education/screens/education_playback_screen.dart';
 import '../features/education/widgets/daily_language_selector.dart';
 import '../models/nurse_app_config.dart';
+import '../models/offline_speech_language.dart';
 import '../theme/nurse_theme.dart';
 import '../widgets/nurse_avatar.dart';
 import '../widgets/nurse_config_dialog.dart';
@@ -67,6 +70,12 @@ class NurseScreen extends StatelessWidget {
                                       () => _openBedsideEducation(
                                         themedContext,
                                         controller,
+                                      ),
+                                  onStartFavoriteEducation:
+                                      (item) => _openFavoriteEducation(
+                                        themedContext,
+                                        controller,
+                                        item,
                                       ),
                                 );
                                 return Padding(
@@ -139,6 +148,11 @@ class NurseScreen extends StatelessWidget {
           ),
     );
     if (updated != null) await controller.saveConfig(updated);
+    try {
+      await controller.loadActiveEducation();
+    } catch (_) {
+      // The controller exposes the existing emergency education fallback.
+    }
   }
 
   Future<void> _showCallNurse(
@@ -178,11 +192,26 @@ class NurseScreen extends StatelessWidget {
   Future<void> _openBedsideEducation(
     BuildContext context,
     NurseController controller,
-  ) async {
+  ) => _openEducation(context, controller);
+
+  Future<void> _openFavoriteEducation(
+    BuildContext context,
+    NurseController controller,
+    EducationItem item,
+  ) => _openEducation(context, controller, directItem: item);
+
+  Future<void> _openEducation(
+    BuildContext context,
+    NurseController controller, {
+    EducationItem? directItem,
+  }) async {
     try {
-      final items = await controller.loadActiveEducation();
+      final items =
+          directItem == null
+              ? await controller.loadActiveEducation()
+              : controller.activeEducationItems;
       if (!context.mounted) return;
-      if (items.isEmpty) {
+      if (directItem == null && items.isEmpty) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('当前科室还没有可用的宣教内容')));
@@ -190,30 +219,55 @@ class NurseScreen extends StatelessWidget {
       }
       final session = controller.createBedsideEducationSession();
       await session.startSession(controller.config.offlineSpeechLanguage);
-      if (!context.mounted) return;
+      if (directItem != null) await session.selectItem(directItem);
+      if (!context.mounted) {
+        await session.clearTransientState();
+        return;
+      }
       final palette = NursePalette.forStyle(controller.config.visualStyle);
+      final educationScreen =
+          directItem == null
+              ? BedsideEducationScreen(
+                items: items,
+                session: session,
+                departmentName: controller.config.wardName,
+                nurseAvatarPath: controller.config.nurseAvatarPath,
+                onOfflinePlaybackStarting:
+                    controller.suspendOnlineAudioForEducation,
+                onOfflinePlaybackEnded:
+                    controller.resumeOnlineAudioAfterEducation,
+                onLanguageChanged:
+                    (language) => unawaited(
+                      controller.selectOfflineSpeechLanguage(language),
+                    ),
+              )
+              : EducationPlaybackScreen(
+                session: session,
+                speech: controller.localSpeechService,
+                departmentName: controller.config.wardName,
+                nurseAvatarPath: controller.config.nurseAvatarPath,
+                autoStart: true,
+                onOfflinePlaybackStarting:
+                    controller.suspendOnlineAudioForEducation,
+                onOfflinePlaybackEnded:
+                    controller.resumeOnlineAudioAfterEducation,
+                onLanguageChanged:
+                    (language) => unawaited(
+                      controller.selectOfflineSpeechLanguage(language),
+                    ),
+              );
       await Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder:
-              (_) => Theme(
-                data: palette.createTheme(),
-                child: BedsideEducationScreen(
-                  items: items,
-                  session: session,
-                  departmentName: controller.config.wardName,
-                  onLanguageChanged:
-                      (language) => unawaited(
-                        controller.selectOfflineSpeechLanguage(language),
-                      ),
-                ),
-              ),
+              (_) => Theme(data: palette.createTheme(), child: educationScreen),
         ),
       );
     } catch (error) {
       if (!context.mounted) return;
+      final target = directItem == null ? '宣教工作台' : '宣教';
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('宣教工作台暂时无法打开：$error')));
+      ).showSnackBar(SnackBar(content: Text('$target暂时无法打开：$error')));
     }
   }
 }
@@ -466,12 +520,14 @@ class _InteractionPanel extends StatelessWidget {
     required this.onSettings,
     required this.onCallNurse,
     required this.onStartBedsideEducation,
+    required this.onStartFavoriteEducation,
   });
 
   final NurseController controller;
   final VoidCallback onSettings;
   final VoidCallback onCallNurse;
   final Future<void> Function() onStartBedsideEducation;
+  final Future<void> Function(EducationItem) onStartFavoriteEducation;
 
   @override
   Widget build(BuildContext context) {
@@ -528,7 +584,7 @@ class _InteractionPanel extends StatelessWidget {
           Row(
             children: [
               Text(
-                controller.educationFallbackActive ? '宣教库异常，已启用旧版应急宣教' : '固定宣教',
+                controller.educationFallbackActive ? '宣教库异常，已启用旧版应急宣教' : '常用宣教',
                 style: TextStyle(
                   color:
                       controller.educationFallbackActive
@@ -571,6 +627,13 @@ class _InteractionPanel extends StatelessWidget {
                   );
                 },
               ),
+            ),
+          ] else ...[
+            const SizedBox(height: 8),
+            _FavoriteEducationStrip(
+              items: controller.favoriteEducationItems,
+              language: controller.config.offlineSpeechLanguage,
+              onSelected: onStartFavoriteEducation,
             ),
           ],
           const SizedBox(height: 16),
@@ -623,6 +686,87 @@ class _TranscriptView extends StatefulWidget {
   State<_TranscriptView> createState() => _TranscriptViewState();
 }
 
+class _FavoriteEducationStrip extends StatefulWidget {
+  const _FavoriteEducationStrip({
+    required this.items,
+    required this.language,
+    required this.onSelected,
+  });
+
+  final List<EducationItem> items;
+  final OfflineSpeechLanguage language;
+  final Future<void> Function(EducationItem) onSelected;
+
+  @override
+  State<_FavoriteEducationStrip> createState() =>
+      _FavoriteEducationStripState();
+}
+
+class _FavoriteEducationStripState extends State<_FavoriteEducationStrip> {
+  bool _opening = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.items.isEmpty) {
+      return const SizedBox(
+        height: 50,
+        child: Align(alignment: Alignment.centerLeft, child: Text('暂无常用宣教')),
+      );
+    }
+    return SizedBox(
+      height: 50,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: widget.items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final item = widget.items[index];
+          final available = item.isAvailableIn(widget.language);
+          final currentTitle = item.contentFor(widget.language).title.trim();
+          final fallbackTitle = item.contents.values
+              .map((content) => content.title.trim())
+              .firstWhere((title) => title.isNotEmpty, orElse: () => '宣教项目');
+          final title = currentTitle.isEmpty ? fallbackTitle : currentTitle;
+          return OutlinedButton.icon(
+            key: ValueKey('favorite-education-${item.id}'),
+            onPressed:
+                !available || _opening ? null : () => _openFavorite(item),
+            icon: Icon(
+              available ? Icons.volume_up_outlined : Icons.block_outlined,
+              size: 18,
+            ),
+            label:
+                available
+                    ? Text(title)
+                    : Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const Text('该语言暂未提供', style: TextStyle(fontSize: 11)),
+                      ],
+                    ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _openFavorite(EducationItem item) async {
+    if (_opening) return;
+    setState(() => _opening = true);
+    try {
+      await widget.onSelected(item);
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
+  }
+}
+
 class _BedsideLaunchButton extends StatefulWidget {
   const _BedsideLaunchButton({required this.onPressed});
 
@@ -646,7 +790,7 @@ class _BedsideLaunchButtonState extends State<_BedsideLaunchButton> {
                 child: CircularProgressIndicator(strokeWidth: 2.2),
               )
               : const Icon(Icons.medical_information_outlined, size: 18),
-      label: Text(_opening ? '正在打开' : '开始床旁宣教'),
+      label: Text(_opening ? '正在打开' : '更多宣教'),
       style: FilledButton.styleFrom(
         visualDensity: VisualDensity.compact,
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
