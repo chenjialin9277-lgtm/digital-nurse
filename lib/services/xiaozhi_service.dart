@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:permission_handler/permission_handler.dart';
 import '../services/online_playback_gate.dart';
 import '../services/xiaozhi_websocket_manager.dart';
@@ -61,11 +62,7 @@ class XiaozhiService {
   bool _isVoiceCallActive = false;
   bool _hasStartedCall = false;
   MessageListener? _messageListener;
-  final OnlinePlaybackGate _onlinePlayback = OnlinePlaybackGate(
-    playFrame: AudioUtil.playOpusData,
-    stopPlayer: AudioUtil.stopPlaying,
-    startPlayer: AudioUtil.initPlayer,
-  );
+  final OnlinePlaybackGate _onlinePlayback;
 
   XiaozhiService({
     required String websocketUrl,
@@ -74,11 +71,19 @@ class XiaozhiService {
     required String token,
     int protocolVersion = 1,
     String? sessionId,
+    @visibleForTesting OnlinePlaybackGate? onlinePlaybackGate,
   }) : websocketUrl = websocketUrl,
        macAddress = macAddress,
        clientId = clientId,
        token = token,
-       protocolVersion = protocolVersion {
+       protocolVersion = protocolVersion,
+       _onlinePlayback =
+           onlinePlaybackGate ??
+           OnlinePlaybackGate(
+             playFrame: AudioUtil.playOpusData,
+             stopPlayer: AudioUtil.stopPlaying,
+             startPlayer: AudioUtil.initPlayer,
+           ) {
     _sessionId = sessionId;
   }
 
@@ -516,6 +521,11 @@ class XiaozhiService {
   }
 
   /// 处理WebSocket事件
+  @visibleForTesting
+  void debugHandleWebSocketEvent(XiaozhiEvent event) {
+    _onWebSocketEvent(event);
+  }
+
   void _onWebSocketEvent(XiaozhiEvent event) {
     switch (event.type) {
       case XiaozhiEventType.connected:
@@ -544,7 +554,18 @@ class XiaozhiService {
         _dispatchEvent(
           XiaozhiServiceEvent(XiaozhiServiceEventType.audioData, audioData),
         );
-        unawaited(_onlinePlayback.enqueueFrame(Uint8List.fromList(audioData)));
+        unawaited(
+          _onlinePlayback
+              .enqueueFrame(Uint8List.fromList(audioData))
+              .catchError((Object error, StackTrace stackTrace) {
+                _dispatchEvent(
+                  XiaozhiServiceEvent(
+                    XiaozhiServiceEventType.error,
+                    '在线音频播放失败：$error',
+                  ),
+                );
+              }),
+        );
         break;
 
       case XiaozhiEventType.error:

@@ -96,6 +96,9 @@ class EducationSessionController extends ChangeNotifier {
   Future<void> beginPlayback() async {
     final item = _requireItem();
     _requireStage(const {EducationSessionStage.ready}, '当前阶段不能开始播报');
+    final readyState = _state;
+    await _save(EducationEventType.playbackStarted);
+    if (!identical(_state, readyState)) return;
     _state = EducationSessionState(
       stage: EducationSessionStage.playing,
       sessionId: _state.sessionId,
@@ -105,7 +108,6 @@ class EducationSessionController extends ChangeNotifier {
       attempt: _state.attempt,
     );
     notifyListeners();
-    await _save(EducationEventType.playbackStarted);
   }
 
   void updateVisibleCaption(String caption) {

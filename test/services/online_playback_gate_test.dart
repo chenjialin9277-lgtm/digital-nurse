@@ -37,4 +37,22 @@ void main() {
       expect(calls, ['stop', 'start']);
     },
   );
+
+  test('failed resume remains suspended and the next resume retries', () async {
+    var starts = 0;
+    final gate = OnlinePlaybackGate(
+      playFrame: (_) async {},
+      stopPlayer: () async {},
+      startPlayer: () async {
+        starts++;
+        if (starts == 1) throw StateError('synthetic player init failure');
+      },
+    );
+    await gate.suspend();
+
+    await expectLater(gate.resume(), throwsStateError);
+    await gate.resume();
+
+    expect(starts, 2);
+  });
 }

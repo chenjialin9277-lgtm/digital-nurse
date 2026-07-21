@@ -59,6 +59,8 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
   bool _showInactivityWarning = false;
   int _operationGeneration = 0;
   bool _replaying = false;
+  bool _startingPlayback = false;
+  String? _playbackStartError;
   bool _offlinePlaybackActive = false;
   Future<void>? _suspendFuture;
   Future<void>? _restoreFuture;
@@ -204,6 +206,7 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
                             scrollController: _captionScrollController,
                             onStart: _startPlayback,
                             compact: compact,
+                            startError: _playbackStartError,
                           );
                           final stage = switch (state.stage) {
                             EducationSessionStage.ready ||
@@ -271,16 +274,32 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
   }
 
   Future<void> _startPlayback() async {
-    if (_finished ||
+    if (_startingPlayback ||
+        _finished ||
         widget.session.state.stage != EducationSessionStage.ready) {
       return;
+    }
+    _startingPlayback = true;
+    if (_playbackStartError != null && mounted) {
+      setState(() => _playbackStartError = null);
     }
     _resetInactivityTimer();
     final state = widget.session.state;
     final body = state.selectedItem!.contentFor(state.language).body;
     _captionRunes = body.runes.toList(growable: false);
     _visibleRuneCount = 0;
-    await widget.session.beginPlayback();
+    try {
+      await widget.session.beginPlayback();
+    } catch (_) {
+      if (!_finished && mounted) {
+        setState(() {
+          _playbackStartError = '使用记录保存失败，宣教未开始，请重试';
+        });
+      }
+      return;
+    } finally {
+      _startingPlayback = false;
+    }
     if (_finished ||
         !mounted ||
         widget.session.state.stage != EducationSessionStage.playing) {
@@ -545,9 +564,9 @@ class _EducationPlaybackScreenState extends State<EducationPlaybackScreen>
         }
       }
       if (!_offlinePlaybackActive) return;
-      _offlinePlaybackActive = false;
       try {
         await widget.onOfflinePlaybackEnded?.call();
+        _offlinePlaybackActive = false;
       } catch (_) {
         // Restoring online playback must never prevent privacy clearing.
       }
@@ -665,6 +684,7 @@ class _EducationIntroduction extends StatelessWidget {
     required this.scrollController,
     required this.onStart,
     required this.compact,
+    required this.startError,
   });
 
   final String title;
@@ -676,6 +696,7 @@ class _EducationIntroduction extends StatelessWidget {
   final ScrollController scrollController;
   final VoidCallback onStart;
   final bool compact;
+  final String? startError;
 
   @override
   Widget build(BuildContext context) {
@@ -707,6 +728,16 @@ class _EducationIntroduction extends StatelessWidget {
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
+            if (startError != null) ...[
+              SizedBox(height: compact ? 8 : 12),
+              Text(
+                startError!,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             Expanded(
               child: Container(

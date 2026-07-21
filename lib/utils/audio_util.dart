@@ -1,14 +1,12 @@
+// ignore_for_file: avoid_print, constant_identifier_names
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
-import 'dart:collection';
 import 'package:record/record.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:opus_dart/opus_dart.dart';
-import 'package:just_audio/just_audio.dart' as ja;
 import 'package:audio_session/audio_session.dart';
-import 'package:collection/collection.dart';
 import 'package:flutter_pcm_player/flutter_pcm_player.dart';
 
 /// 音频工具类，用于处理Opus音频编解码和录制播放
@@ -19,15 +17,14 @@ class AudioUtil {
   static const int FRAME_DURATION = 60; // 毫秒
 
   static final AudioRecorder _audioRecorder = AudioRecorder();
-  static ja.AudioPlayer? _player;
   static bool _isRecorderInitialized = false;
   static bool _isPlayerInitialized = false;
   static bool _isRecording = false;
   static bool _isPlaying = false;
   static final StreamController<Uint8List> _audioStreamController =
       StreamController<Uint8List>.broadcast();
-  static String? _tempFilePath;
-  static Timer? _audioProcessingTimer;
+  static StreamSubscription<Uint8List>? _recordingSubscription;
+  static final List<int> _pendingPcmBytes = [];
 
   // Opus相关
   static final _encoder = SimpleOpusEncoder(
@@ -55,22 +52,8 @@ class AudioUtil {
     // 更积极地请求所有可能需要的权限
     if (Platform.isAndroid) {
       print('$TAG: 请求Android所需的所有权限');
-      Map<Permission, PermissionStatus> statuses =
-          await [
-            Permission.microphone,
-            Permission.storage,
-            Permission.manageExternalStorage,
-            Permission.bluetooth,
-            Permission.bluetoothConnect,
-            Permission.bluetoothScan,
-          ].request();
-
-      print('$TAG: 权限状态:');
-      statuses.forEach((permission, status) {
-        print('$TAG: $permission: $status');
-      });
-
-      if (statuses[Permission.microphone] != PermissionStatus.granted) {
+      final status = await Permission.microphone.request();
+      if (status != PermissionStatus.granted) {
         print('$TAG: 麦克风权限被拒绝');
         throw Exception('需要麦克风权限');
       }
@@ -146,6 +129,8 @@ class AudioUtil {
     } catch (e) {
       print('$TAG: PCM播放器初始化失败: $e');
       _isPlayerInitialized = false;
+      _pcmPlayer = null;
+      rethrow;
     }
   }
 
@@ -172,6 +157,7 @@ class AudioUtil {
       // 直接发送到播放器
       if (_pcmPlayer != null) {
         await _pcmPlayer!.feed(pcmBytes);
+        _isPlaying = true;
       }
     } catch (e) {
       print('$TAG: 播放失败: $e');
@@ -193,12 +179,14 @@ class AudioUtil {
       }
       _pcmPlayer = null;
       _isPlayerInitialized = false;
+      _isPlaying = false;
     }
   }
 
   /// 释放资源
   static Future<void> dispose() async {
-    _audioStreamController.close();
+    await stopRecording();
+    await stopPlaying();
     print('$TAG: 资源已释放');
   }
 
@@ -240,14 +228,19 @@ class AudioUtil {
         _isRecording = true;
         print('$TAG: 流式录音启动成功');
 
-        // 直接从流中处理数据
-        stream.listen(
-          (data) async {
-            if (data.isNotEmpty && data.length % 2 == 0) {
-              final opusData = await encodeToOpus(data);
-              if (opusData != null) {
-                _audioStreamController.add(opusData);
-              }
+        _pendingPcmBytes.clear();
+        _recordingSubscription = stream.listen(
+          (data) {
+            if (data.isEmpty) return;
+            _pendingPcmBytes.addAll(data);
+            const frameBytes = SAMPLE_RATE * FRAME_DURATION ~/ 1000 * 2;
+            while (_pendingPcmBytes.length >= frameBytes) {
+              final frame = Uint8List.fromList(
+                _pendingPcmBytes.sublist(0, frameBytes),
+              );
+              _pendingPcmBytes.removeRange(0, frameBytes);
+              final opusData = encodeToOpus(frame);
+              if (opusData != null) _audioStreamController.add(opusData);
             }
           },
           onError: (error) {
@@ -275,12 +268,12 @@ class AudioUtil {
   static Future<String?> stopRecording() async {
     if (!_isRecorderInitialized || !_isRecording) return null;
 
-    // 取消定时器
-    _audioProcessingTimer?.cancel();
-
     // 停止录音
     try {
       final path = await _audioRecorder.stop();
+      await _recordingSubscription?.cancel();
+      _recordingSubscription = null;
+      _pendingPcmBytes.clear();
       _isRecording = false;
       print('$TAG: 停止录音: $path');
       return path;
@@ -292,7 +285,7 @@ class AudioUtil {
   }
 
   /// 将PCM数据编码为Opus格式
-  static Future<Uint8List?> encodeToOpus(Uint8List pcmData) async {
+  static Uint8List? encodeToOpus(Uint8List pcmData) {
     try {
       // 删除频繁日志
       // 转换PCM数据为Int16List (小端字节序，与Android一致)

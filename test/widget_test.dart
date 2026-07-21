@@ -141,6 +141,24 @@ void main() {
     expect(online.resumeCalls, 1);
   });
 
+  test('在线音频恢复失败可见且下次成功会清除专用错误', () async {
+    final online = _FakeXiaozhiService()..resumeFailuresRemaining = 1;
+    final controller = NurseController(xiaozhiService: online)
+      ..state = NurseUiState.idle;
+
+    await expectLater(
+      controller.resumeOnlineAudioAfterEducation(),
+      throwsStateError,
+    );
+    expect(controller.state, NurseUiState.error);
+    expect(controller.errorMessage, contains('在线语音恢复失败'));
+
+    await controller.resumeOnlineAudioAfterEducation();
+    expect(online.resumeCalls, 2);
+    expect(controller.state, NurseUiState.idle);
+    expect(controller.errorMessage, isNull);
+  });
+
   test('固定回答错误后恢复在线音频', () async {
     final speech = _FakeLocalSpeechService();
     final online = _FakeXiaozhiService();
@@ -565,6 +583,7 @@ class _FakeXiaozhiService extends XiaozhiService {
 
   int suspendCalls = 0;
   int resumeCalls = 0;
+  int resumeFailuresRemaining = 0;
 
   @override
   Future<void> suspendOnlinePlayback() async {
@@ -574,6 +593,10 @@ class _FakeXiaozhiService extends XiaozhiService {
   @override
   Future<void> resumeOnlinePlayback() async {
     resumeCalls++;
+    if (resumeFailuresRemaining > 0) {
+      resumeFailuresRemaining--;
+      throw StateError('synthetic online resume failure');
+    }
   }
 
   @override

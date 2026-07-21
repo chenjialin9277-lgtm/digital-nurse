@@ -16,6 +16,34 @@ import 'education_test_fixtures.dart';
 import 'fake_education_event_repository.dart';
 
 void main() {
+  testWidgets('playback-start save failure stays ready and can retry', (
+    tester,
+  ) async {
+    final events = _FailOncePlaybackStartRepository();
+    final session = EducationSessionController(
+      events: events,
+      departmentId: 'emergency_ward',
+    );
+    await session.startSession(OfflineSpeechLanguage.mandarin);
+    await session.selectItem(reviewedItem);
+    final speech = _FakeLocalSpeechService();
+    await tester.pumpWidget(_playbackApp(session, speech));
+
+    await tester.tap(find.text('开始播放'));
+    await tester.pump();
+
+    expect(find.text('使用记录保存失败，宣教未开始，请重试'), findsOneWidget);
+    expect(session.state.stage, EducationSessionStage.ready);
+    expect(speech.spoken, isNull);
+    expect(find.text('开始播放'), findsOneWidget);
+
+    await tester.tap(find.text('开始播放'));
+    await tester.pump();
+    expect(session.state.stage, EducationSessionStage.playing);
+    expect(speech.spoken, isNotNull);
+    expect(find.text('使用记录保存失败，宣教未开始，请重试'), findsNothing);
+  });
+
   testWidgets(
     'auto-start playback keeps avatar and replaces captions with question',
     (tester) async {
@@ -76,6 +104,31 @@ void main() {
     expect(boundary.suspended, 1);
     expect(boundary.resumed, 1);
     expect(session.state.stage, EducationSessionStage.question);
+  });
+
+  testWidgets('failed online restore remains retryable on exit', (
+    tester,
+  ) async {
+    final speech = _FakeLocalSpeechService();
+    final session = await _readySession();
+    final boundary = _FailOnceResumeAudioBoundaryCounter();
+    await tester.pumpWidget(
+      _playbackApp(
+        session,
+        speech,
+        autoStart: true,
+        onOfflinePlaybackStarting: boundary.suspend,
+        onOfflinePlaybackEnded: boundary.resume,
+      ),
+    );
+    await tester.pump();
+    speech.complete();
+    await tester.pump();
+    expect(boundary.resumed, 1);
+
+    await tester.tap(find.byTooltip('结束并返回'));
+    await tester.pump();
+    expect(boundary.resumed, 2);
   });
 
   testWidgets('speak exception restores online audio exactly once', (
@@ -665,6 +718,14 @@ class _AudioBoundaryCounter {
   Future<void> resume() async => resumed++;
 }
 
+class _FailOnceResumeAudioBoundaryCounter extends _AudioBoundaryCounter {
+  @override
+  Future<void> resume() async {
+    resumed++;
+    if (resumed == 1) throw StateError('synthetic online restore failure');
+  }
+}
+
 class _BlockingRestoreAudioBoundaryCounter extends _AudioBoundaryCounter {
   final _firstRestore = Completer<void>();
 
@@ -714,6 +775,24 @@ class _BlockingPlaybackEventRepository implements EducationEventRepository {
   Future<void> save(EducationSessionEvent event) async {
     if (event.type == EducationEventType.playbackStarted) {
       await _playbackCompleter?.future;
+    }
+  }
+
+  @override
+  Future<List<EducationSessionEvent>> loadBetween(
+    DateTime start,
+    DateTime end,
+  ) async => const [];
+}
+
+class _FailOncePlaybackStartRepository implements EducationEventRepository {
+  var _failed = false;
+
+  @override
+  Future<void> save(EducationSessionEvent event) async {
+    if (event.type == EducationEventType.playbackStarted && !_failed) {
+      _failed = true;
+      throw StateError('synthetic playback-start persistence failure');
     }
   }
 

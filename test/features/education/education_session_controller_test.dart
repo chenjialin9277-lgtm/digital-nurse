@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:digital_nurse/features/education/controllers/education_session_controller.dart';
+import 'package:digital_nurse/features/education/data/education_event_repository.dart';
 import 'package:digital_nurse/features/education/models/education_session_event.dart';
 import 'package:digital_nurse/models/offline_speech_language.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +10,48 @@ import 'education_test_fixtures.dart';
 import 'fake_education_event_repository.dart';
 
 void main() {
+  test(
+    'playback-start persistence failure leaves session ready to retry',
+    () async {
+      final events =
+          FakeEducationEventRepository()
+            ..failOnType = EducationEventType.playbackStarted;
+      final controller = EducationSessionController(
+        events: events,
+        departmentId: 'emergency_ward',
+      );
+      await controller.startSession(OfflineSpeechLanguage.mandarin);
+      await controller.selectItem(reviewedItem);
+
+      await expectLater(controller.beginPlayback(), throwsStateError);
+
+      expect(controller.state.stage, EducationSessionStage.ready);
+      expect(controller.state.selectedItem, reviewedItem);
+    },
+  );
+
+  test(
+    'exit while playback-start event is saving cannot re-enter playing',
+    () async {
+      final events = _BlockingPlaybackStartRepository();
+      final controller = EducationSessionController(
+        events: events,
+        departmentId: 'emergency_ward',
+      );
+      await controller.startSession(OfflineSpeechLanguage.mandarin);
+      await controller.selectItem(reviewedItem);
+
+      final playback = controller.beginPlayback();
+      await Future<void>.delayed(Duration.zero);
+      await controller.clearTransientState();
+      events.releasePlaybackStart();
+      await playback;
+
+      expect(controller.state.stage, EducationSessionStage.idle);
+      expect(controller.state.selectedItem, isNull);
+    },
+  );
+
   test('播报结束后显示理解题，答对后完成本次理解确认', () async {
     final events = FakeEducationEventRepository();
     final controller = EducationSessionController(
@@ -144,4 +189,23 @@ void main() {
     expect(controller.state.visibleCaption, isEmpty);
     expect(controller.lastPersistenceError, isA<StateError>());
   });
+}
+
+class _BlockingPlaybackStartRepository implements EducationEventRepository {
+  final _playbackStart = Completer<void>();
+
+  void releasePlaybackStart() => _playbackStart.complete();
+
+  @override
+  Future<void> save(EducationSessionEvent event) async {
+    if (event.type == EducationEventType.playbackStarted) {
+      await _playbackStart.future;
+    }
+  }
+
+  @override
+  Future<List<EducationSessionEvent>> loadBetween(
+    DateTime start,
+    DateTime end,
+  ) async => const [];
 }

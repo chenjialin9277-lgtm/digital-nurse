@@ -76,6 +76,8 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   bool _playingLocalAnswer = false;
   NurseUiState _stateBeforeLocalAnswer = NurseUiState.idle;
   int _networkErrorCount = 0;
+  String? _onlineAudioRestoreError;
+  NurseUiState _stateBeforeOnlineAudioRestoreError = NurseUiState.idle;
   final List<int> _captionTarget = [];
   int _captionVisibleCount = 0;
   int _currentSentenceEnd = 0;
@@ -529,7 +531,28 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> resumeOnlineAudioAfterEducation() async {
-    await _service?.resumeOnlinePlayback();
+    try {
+      await _service?.resumeOnlinePlayback();
+      final restoreError = _onlineAudioRestoreError;
+      _onlineAudioRestoreError = null;
+      if (restoreError != null && errorMessage == restoreError) {
+        errorMessage = null;
+        if (state == NurseUiState.error) {
+          state = _stateBeforeOnlineAudioRestoreError;
+        }
+        notifyListeners();
+      }
+    } catch (error) {
+      if (_onlineAudioRestoreError == null) {
+        _stateBeforeOnlineAudioRestoreError = state;
+      }
+      final message = '在线语音恢复失败，请重试：$error';
+      _onlineAudioRestoreError = message;
+      state = NurseUiState.error;
+      errorMessage = message;
+      notifyListeners();
+      rethrow;
+    }
   }
 
   bool verifySettingsPassword(String input) => input == config.settingsPassword;
