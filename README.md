@@ -7,6 +7,8 @@
 - 仓库：<https://github.com/chenjialin9277-lgtm/digital-nurse>（私有，需要仓库访问权限）。
 - 工具链：Flutter **3.44.6** / Dart **3.12.2**、JDK **17**、Android SDK **36**、NDK **27.0.12077973**。
 
+工程建议克隆到**不含空格的路径**（例如 `~/Projects/digital-nurse`）。本次实测发现 Opus 原生构建脚本无法正确处理原目录中的空格。
+
 ## 同事从这里开始
 
 1. 阅读 [开发交接](docs/HANDOFF.md)，了解当前状态和接手事项。

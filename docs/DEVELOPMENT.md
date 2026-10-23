@@ -13,6 +13,8 @@
 
 安装 Android Studio 或 Android 命令行 SDK，安装 platform-tools、platforms;android-36、build-tools;36.0.0、ndk;27.0.12077973 并接受 SDK 许可。设置 `JAVA_HOME`、`ANDROID_HOME`，将 Flutter/bin 加入 PATH，执行 `flutter doctor -v`。本次整理保留已使用的依赖版本，不进行整套框架升级。
 
+工程路径应不含空格；原电脑实际目录包含 `桌面 - Unknown`，Opus 的 Android 原生脚本将输出参数拆开导致编译失败。使用独立、无空格的克隆目录进行开发和构建。
+
 首次执行 `flutter pub get` 后，Flutter 会生成本机 `android/local.properties`。其 `sdk.dir` 和 `flutter.sdk` 必须指向接手者自己的工具链，不复制开发者原电脑的路径。
 
 ## 检查、调试与打包
