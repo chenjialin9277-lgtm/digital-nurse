@@ -1,92 +1,97 @@
 # 数字护士 Android 平板客户端
 
-面向 Android 横屏平板的数字护士客户端。应用通过小智 AI 连接科室智能体和知识库，同时提供可扩展的三语离线床旁宣教、理解确认、匿名使用统计和 Excel 导出。
+面向 Android 横屏平板的数字护士：小智 AI 在线问答、普通话/粤语/英语离线床旁宣教、理解确认、本地视频宣教、科室配置和匿名使用统计。
 
-## 当前版本
+- 当前应用版本：**0.17.0+23**；本仓库是 2026-10-23 整理的开发交接版本。
+- 支持目标：Android 7.0（API 24）及以上；通用 APK 包含 ARM32、ARM64、x86_64。
+- 仓库：<https://github.com/chenjialin9277-lgtm/digital-nurse>（私有，需要仓库访问权限）。
+- 工具链：Flutter **3.44.6** / Dart **3.12.2**、JDK **17**、Android SDK **36**、NDK **27.0.12077973**。
 
-- 版本：0.15.1 星标直达与音频恢复版
-- Android：最低 Android 7.0（API 24）
-- 屏幕：优先适配 14 英寸横屏平板
-- 分发：APK 侧载，不依赖任何应用商店
-- 权限：网络、麦克风、音频控制
-- 协议：小智 AI WebSocket + Opus 16 kHz 单声道音频
+工程建议克隆到**不含空格的路径**（例如 `~/Projects/digital-nurse`）。本次实测发现 Opus 原生构建脚本无法正确处理原目录中的空格。
 
-## v0.3 品牌与人物形象
+## 同事从这里开始
 
-- 默认医院：广州中医药大学第三附属医院
-- 默认病区：急诊病房
-- 顶部同时显示医院 Logo 与急诊病房科室 Logo
-- 使用经授权真人参考照片制作半写实数字护士形象
-- 保留呼吸浮动、状态光环、聆听/思考/说话状态和说话音频条动画
+1. 阅读 [开发交接](docs/HANDOFF.md)，了解当前状态和接手事项。
+2. 按下列步骤下载完整源码及模型，运行检查。
+3. 查看 [开发与架构说明](docs/DEVELOPMENT.md)、[审查报告](docs/AUDIT.md) 和 [文件清单](docs/SOURCE_INVENTORY.md)。
 
-## v0.4 使用体验优化
+```bash
+# 先安装 Git LFS；例如 macOS 使用 brew install git-lfs。
+git lfs install
+git clone https://github.com/chenjialin9277-lgtm/digital-nurse.git
+cd digital-nurse
+git lfs pull
 
-- 长回答字幕不再按句覆盖，改为整段累积显示
-- 字幕依据小智 TTS 句子事件逐字出现，并在句尾自动校准
-- 字幕区域支持自动跟随最新内容，也可手工上下滑动回看
-- WebSocket 握手完成后才进入连接状态，避免假连接提示
-- 断线按 2、4、8、15、30 秒渐进退避重连，短暂波动不再反复覆盖字幕
-- 设置中可切换深海科技、医疗清雅、岭南青玉、温馨关怀四套显示风格
+# 将 Flutter 3.44.6/bin 加入 PATH，并配置 JDK 17、Android SDK。
+flutter --version
+flutter pub get
+bash scripts/check.sh
 
-## v0.8 固定宣教与形象融合
+# 连接已开启 USB 调试的 Android 平板。
+flutter devices
+flutter run
+```
 
-- 8 项固定宣教均由 APP 本地保存和播放，可在密码保护的设置页修改，不经过小智知识库。
-- 点击固定宣教时先释放小智 PCM 音频通道，再使用 Android 本地中文 TTS 播放。
-- 固定宣教字幕在语音开始后逐字显示，播放完成后保留全文。
-- 数字护士保持用户提供的静态真人形象，不叠加不自然的眼嘴动效；仅优化缩放、裁切和主题背景融合。
+**模型使用 Git LFS 保存**，包括超过普通 Git 单文件限制的粤语模型。必须使用 Git + LFS 下载；GitHub 的“Download ZIP”不能作为已验证的完整开发副本。资源是否齐全可单独检查：
 
-## v0.9 内置离线普通话
+```bash
+python3 scripts/verify_repository.py
+```
 
-- 固定宣教不再调用 Android 系统 TTS，避免小米系统缺少中文语音引擎时只显示字幕但没有声音。
-- APP 内置 sherpa-onnx 离线运行库和普通话女声模型，断网时仍可生成语音。
-- 神经语音生成在独立工作线程运行，不阻塞平板界面；语音开始后逐字显示字幕。
-- 发布 APK 仅包含 Xiaomi Pad 6 Max 需要的 arm64 语音库，以控制安装包体积。
+## 构建 APK
 
-## v0.10 普通话 / 粤语 / 英语离线切换
+```bash
+flutter build apk --debug
+# 输出：build/app/outputs/flutter-apk/app-debug.apk
+```
 
-- 主界面固定宣教区直接提供“普通话 / 粤语 / English”切换，不需进入设置。
-- 切换时，8 个选项名称、固定回答、逐字字幕和离线语音同时切换，并记住上次选择。
-- 设置页可分别编辑三种语言的 8 项内容；旧版已保存的普通话内容会自动保留。
-- 三套语音模型全部随 APK 分发，断网可用，且任何时候只在内存中加载当前选中的一套。
-- 当前仍属内部测试版。普通话“小雅”明确限非商业使用，粤语和英语模型的商用权利也须在正式发布前完成核验；详见 `RELEASE_CHECKLIST.md`。
+Debug 构建不需要正式签名。正式构建前，将 `android/key.properties.example` 复制为 `android/key.properties`，向项目负责人私下取得原签名文件及密码后填写，再执行：
 
-## v0.15 床旁宣教闭环
+```bash
+flutter build apk --release
+```
 
-- 首页一键进入床旁宣教工作台，支持分类、搜索、收藏和最近使用。
-- 普通话、粤语、英语可在主界面及宣教界面直接切换；未审核发布的译文不会默认回退为普通话。
-- 科室管理员可新增、复制、排序、停用和分语言发布宣教，数量不再限于 8 项。
-- 离线语音播放后进入理解确认；支持重播、请护士解释、完成和隐私清屏。
-- 床旁会话超时自动清屏；不记录患者姓名、住院号、床号、电话、诊断或治疗信息。
-- 使用记录可按日期查询，并导出包含 5 张工作表的 Excel 文件。
-- 升级时自动迁移旧版科室自定义内容；宣教库异常时仍保留旧版应急宣教入口。
-- 发布包为通用 APK，覆盖 `armeabi-v7a`、`arm64-v8a` 和 `x86_64`。
+应用 ID `com.digitalnurse.app` 和原正式签名必须保持一致，才能覆盖升级现有设备并保留本机数据。缺少正式签名时 Release 构建会明确失败。Debug APK 使用调试签名，不能用于覆盖现有正式签名安装。
 
-## v0.15.1 星标直达与音频恢复
+## 功能与运行方式
 
-- 首页新增收藏宣教直达区，可一键进入常用床旁宣教，并保持与宣教工作台收藏状态同步。
-- 播放宣教时，独立宣教播放页展示播放进度、当前文本和理解确认操作，布局更适合床旁使用。
-- 小智在线音频被本地宣教中断后可自动恢复，避免后续对话无声音。
-- 升级可直接覆盖安装 v0.15.0 或 v0.14.1，请勿先卸载，以保留本机配置、宣教内容和使用记录。
-- 正式对外发布前，必须确认普通话“小雅”、粤语和英语离线语音模型的商业使用权利，并完成数字护士真人肖像、医院 Logo 及科室 Logo 的授权归档；未完成前仅限内部测试和非商业演示。
+- **在线问答**：按住主按钮说话、松开发送；通过小智 WebSocket 与 Opus 16 kHz 单声道音频连接科室智能体。
+- **首次绑定**：设置默认使用官方 OTA 激活流程；在 <https://xiaozhi.me> 添加设备并输入平板显示的激活码。自建服务器模式可手工配置连接地址和 Token。
+- **文字宣教**：分类、搜索、收藏、三语内容及离线语音，播放后进入理解确认；旧科室内容在首次启动时迁移。
+- **三语智能同步**：复用已绑定的小智账号生成粤语和英语草稿，必须逐语言复核发布；生成需要联网，已发布内容可离线播放。
+- **视频宣教**：从系统选择器导入，复制到应用私有目录，在应用内横屏播放。
+- **设置与品牌**：科室名称、Logo、护士形象、启动字幕、主题和管理员密码均可配置。首次接手应更改默认设置密码 `123456`。
+- **匿名统计**：本机保存使用事件，按日期查询并导出五张工作表的 Excel 文件；不需要自建业务后端。
 
-## 首次激活
+涉及病情变化、诊断、用药或紧急情况时应联系医护人员。当前语音模型及形象授权状态见 [发布检查清单](RELEASE_CHECKLIST.md)，交接上传不代表已完成正式商业发布。
 
-默认使用小智 AI 官方平台。APP 会按照官方固件流程自动生成独立设备 ID，从官方 OTA 配置接口取得激活码，并在绑定后自动取得 WebSocket 地址、Token 与协议版本。用户无需查找或手工填写 Token。
+## 工程目录
 
-首次启动后，在 `xiaozhi.me` 登录小智账号，添加设备并输入 APP 显示的激活码。平板作为独立设备接入，不复用 ESP32-S3 的设备 ID；绑定后可在控制台为平板选择与 ESP32 相同的智能体和知识库。
+| 路径 | 用途 |
+| --- | --- |
+| `lib/controllers/`、`lib/screens/`、`lib/widgets/` | 首页状态、交互、设置及通用界面 |
+| `lib/features/education/` | 宣教模型、仓储、会话、管理与播放页面 |
+| `lib/services/`、`lib/repositories/` | 在线连接、离线语音、缓存、配置和统计 |
+| `android/app/src/main/kotlin/com/digitalnurse/app/` | 数据库、系统选择器、视频播放、Excel 导出及网络事件 |
+| `packages/flutter_pcm_player/` | 项目内维护的 Android PCM 插件 |
+| `assets/images/`、`assets/tts/` | 当前应用图片与三语语音模型 |
+| `assets/source/`、`assets/avatar3d/` | 原始品牌素材和历史 3D 实验资源，均保留供后续开发 |
+| `test/` | 单元、界面、升级兼容和图像基准测试 |
+| `scripts/`、`tool/` | 统一检查、仓库与资源校验、离线语音验证工具 |
+| `docs/` | 当前开发交接资料及资源校验清单 |
+| `docs/archive/` | 原始项目文档、旧版本说明和历史设计材料 |
+| `ios/`、`macos/`、`linux/`、`windows/`、`web/` | 上游平台工程骨架，当前数字护士仅验收 Android |
 
-设置页仍保留“自建服务器”高级模式，可手工填写 WebSocket 地址和 Token。Token 使用 Android 加密存储，仅保存在本机。
+## 自动检查与开发约定
 
-## 使用方式
+每次提交前执行 `bash scripts/check.sh`。GitHub Actions 自动检查格式、静态分析、全部测试和资源完整性；手动运行工作流时可额外生成 Debug APK。工作流不自动发布应用或文档网站。
 
-按住主按钮说话，松开后等待小智知识库回答。也可以点击“入院注意事项”“住院安全须知”“出院流程”等快捷问题。涉及病情变化、诊断、用药或紧急情况时应联系医护人员，不以数字护士回答替代专业医疗判断。
+保留 `pubspec.lock`；以 `main` 为接手基线，在 `feature/*`、`fix/*` 或 `refactor/*` 分支开发。数据库版本、旧配置键、应用 ID、MethodChannel 名称和发布审核规则的兼容要求见开发说明。
 
-## 构建
+签名密钥、密码、设备 Token、构建缓存、历史 APK 和含签名的备份留在受控的本地环境。所有当前源码、平台工程、测试、模型、运行素材及原始设计资源均随本仓库交接。
 
-项目使用 Flutter 3.44、JDK 17 和 Android SDK 36。发布版需要保留 `android/app/digital-nurse-release.jks` 与 `android/key.properties`，否则后续 APK 无法覆盖升级已安装版本。
+## 版权与历史
 
-## 开源说明
+本工程改造自 [TOM88812/xiaozhi-android-client](https://github.com/TOM88812/xiaozhi-android-client)，保留原提交历史和 Apache-2.0 许可；详见 [LICENSE](LICENSE)、[NOTICE](NOTICE) 和 [PCM 插件许可](packages/flutter_pcm_player/LICENSE)。
 
-通信与基础音频实现参考并改造自 `TOM88812/xiaozhi-android-client`（Apache-2.0）。小智 ESP32 官方固件仓库为 `78/xiaozhi-esp32`（MIT）。本项目内维护的 PCM 播放器源自 `rocchen/flutter_pcm_player`（BSD 类许可），已为新版 Android 构建链修复命名空间与播放生命周期。
-
-详细版权与许可证见 `LICENSE`、`NOTICE` 及 `packages/flutter_pcm_player/LICENSE`。
+原多语言 README、文档网站源码、赞助页及旧说明移至 [上游资料归档](docs/archive/upstream/README.md)；整理前的数字护士版本记录见 [原 README](docs/archive/README-before-handoff.md)。历史材料中的命令和平台支持信息不作为当前开发入口。

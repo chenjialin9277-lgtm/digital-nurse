@@ -1,5 +1,3 @@
-// ignore_for_file: avoid_print, constant_identifier_names, prefer_initializing_formals
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -7,8 +5,11 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:permission_handler/permission_handler.dart';
 import '../services/online_playback_gate.dart';
+import '../services/push_to_talk_audio_session.dart';
 import '../services/xiaozhi_websocket_manager.dart';
 import '../utils/audio_util.dart';
+
+import '../utils/diagnostic_log.dart';
 
 /// 小智服务事件类型
 enum XiaozhiServiceEventType {
@@ -44,8 +45,8 @@ typedef MessageListener = void Function(dynamic message);
 
 /// 小智服务
 class XiaozhiService {
-  static const String TAG = "XiaozhiService";
-  static const String DEFAULT_SERVER = "wss://ws.xiaozhi.ai";
+  static const String _logTag = "XiaozhiService";
+  static const String defaultServer = "wss://ws.xiaozhi.ai";
 
   final String websocketUrl;
   final String macAddress;
@@ -59,25 +60,25 @@ class XiaozhiService {
   bool _isMuted = false;
   final List<XiaozhiServiceListener> _listeners = [];
   StreamSubscription? _audioStreamSubscription;
+  PushToTalkAudioSession? _pushToTalkSession;
   bool _isVoiceCallActive = false;
   bool _hasStartedCall = false;
   MessageListener? _messageListener;
   final OnlinePlaybackGate _onlinePlayback;
+  Completer<String>? _silentTextCompleter;
+  StringBuffer? _silentTextBuffer;
+  Timer? _silentTextTimeout;
+  bool _silentTextReceivedStart = false;
 
   XiaozhiService({
-    required String websocketUrl,
-    required String macAddress,
-    required String clientId,
-    required String token,
-    int protocolVersion = 1,
+    required this.websocketUrl,
+    required this.macAddress,
+    required this.clientId,
+    required this.token,
+    this.protocolVersion = 1,
     String? sessionId,
     @visibleForTesting OnlinePlaybackGate? onlinePlaybackGate,
-  }) : websocketUrl = websocketUrl,
-       macAddress = macAddress,
-       clientId = clientId,
-       token = token,
-       protocolVersion = protocolVersion,
-       _onlinePlayback =
+  }) : _onlinePlayback =
            onlinePlaybackGate ??
            OnlinePlaybackGate(
              playFrame: AudioUtil.playOpusData,
@@ -93,7 +94,7 @@ class XiaozhiService {
     if (_isVoiceCallActive) return;
 
     try {
-      print('$TAG: 正在切换到语音通话模式');
+      logDiagnostic('$_logTag: 正在切换到语音通话模式');
 
       // 简化初始化流程，确保干净状态
       await AudioUtil.stopPlaying();
@@ -101,9 +102,9 @@ class XiaozhiService {
       await AudioUtil.initPlayer();
 
       _isVoiceCallActive = true;
-      print('$TAG: 已切换到语音通话模式');
+      logDiagnostic('$_logTag: 已切换到语音通话模式');
     } catch (e) {
-      print('$TAG: 切换到语音通话模式失败: $e');
+      logDiagnostic('$_logTag: 切换到语音通话模式失败: $e');
       rethrow;
     }
   }
@@ -114,7 +115,7 @@ class XiaozhiService {
     if (!_isVoiceCallActive) return;
 
     try {
-      print('$TAG: 正在切换到普通聊天模式');
+      logDiagnostic('$_logTag: 正在切换到普通聊天模式');
 
       // 停止语音通话相关的活动
       await stopListeningCall();
@@ -123,9 +124,9 @@ class XiaozhiService {
       await AudioUtil.stopPlaying();
 
       _isVoiceCallActive = false;
-      print('$TAG: 已切换到普通聊天模式');
+      logDiagnostic('$_logTag: 已切换到普通聊天模式');
     } catch (e) {
-      print('$TAG: 切换到普通聊天模式失败: $e');
+      logDiagnostic('$_logTag: 切换到普通聊天模式失败: $e');
       _isVoiceCallActive = false;
     }
   }
@@ -149,7 +150,7 @@ class XiaozhiService {
 
   /// 分发事件到所有监听器
   void _dispatchEvent(XiaozhiServiceEvent event) {
-    for (var listener in _listeners) {
+    for (final listener in List<XiaozhiServiceListener>.of(_listeners)) {
       listener(event);
     }
   }
@@ -164,7 +165,7 @@ class XiaozhiService {
     }
 
     try {
-      print('$TAG: 开始连接服务器...');
+      logDiagnostic('$_logTag: 开始连接服务器...');
 
       // 创建WebSocket管理器
       _webSocketManager = XiaozhiWebSocketManager(
@@ -180,7 +181,7 @@ class XiaozhiService {
       // 连接WebSocket
       await _webSocketManager!.connect(websocketUrl, token);
     } catch (e) {
-      print('$TAG: 连接失败: $e');
+      logDiagnostic('$_logTag: 连接失败: $e');
       _dispatchEvent(
         XiaozhiServiceEvent(XiaozhiServiceEventType.error, '连接小智服务失败: $e'),
       );
@@ -189,9 +190,13 @@ class XiaozhiService {
 
   /// 断开小智服务连接
   Future<void> disconnect() async {
-    if (_webSocketManager == null) return;
-
     try {
+      final pushToTalk = _pushToTalkSession;
+      _pushToTalkSession = null;
+      await pushToTalk?.stop();
+
+      if (_webSocketManager == null) return;
+
       // 取消音频流订阅
       await _audioStreamSubscription?.cancel();
       _audioStreamSubscription = null;
@@ -206,7 +211,7 @@ class XiaozhiService {
       _webSocketManager = null;
       _isConnected = false;
     } catch (e) {
-      print('$TAG: 断开连接失败: $e');
+      logDiagnostic('$_logTag: 断开连接失败: $e');
     }
   }
 
@@ -219,25 +224,25 @@ class XiaozhiService {
     try {
       // 创建一个Completer来等待响应
       final completer = Completer<String>();
-      print('$TAG: 开始发送文本消息: $message');
+      logDiagnostic('$_logTag: 开始发送文本消息');
 
       // 添加消息监听器，监听所有可能的回复
       void onceListener(XiaozhiServiceEvent event) {
         if (event.type == XiaozhiServiceEventType.textMessage) {
           // 忽略echo消息（即我们发送的消息）
           if (event.data == message) {
-            print('$TAG: 忽略echo消息: ${event.data}');
+            logDiagnostic('$_logTag: 忽略echo消息');
             return;
           }
 
-          print('$TAG: 收到服务器响应: ${event.data}');
+          logDiagnostic('$_logTag: 收到服务器响应');
           if (!completer.isCompleted) {
             completer.complete(event.data as String);
             removeListener(onceListener);
           }
         } else if (event.type == XiaozhiServiceEventType.error &&
             !completer.isCompleted) {
-          print('$TAG: 收到错误响应: ${event.data}');
+          logDiagnostic('$_logTag: 收到错误响应');
           completer.completeError(event.data.toString());
           removeListener(onceListener);
         }
@@ -247,13 +252,13 @@ class XiaozhiService {
       addListener(onceListener);
 
       // 发送文本请求
-      print('$TAG: 发送文本请求: $message');
+      logDiagnostic('$_logTag: 发送文本请求');
       _webSocketManager!.sendTextRequest(message);
 
       // 设置超时，15秒比10秒更宽松一些
       final timeoutTimer = Timer(const Duration(seconds: 15), () {
         if (!completer.isCompleted) {
-          print('$TAG: 请求超时，15秒内没有收到响应');
+          logDiagnostic('$_logTag: 请求超时，15秒内没有收到响应');
           completer.completeError('请求超时');
           removeListener(onceListener);
         }
@@ -271,8 +276,54 @@ class XiaozhiService {
         rethrow;
       }
     } catch (e) {
-      print('$TAG: 发送消息失败: $e');
+      logDiagnostic('$_logTag: 发送消息失败: $e');
       rethrow;
+    }
+  }
+
+  /// Requests a text-only answer through the already-bound Xiaozhi account.
+  /// Incoming TTS audio and UI events are suppressed until the response is
+  /// complete, which lets settings features such as translation reuse the
+  /// existing account without speaking the prompt or JSON result aloud.
+  Future<String> requestSilentTextMessage(String message) async {
+    if (_silentTextCompleter != null) {
+      throw StateError('已有一项智能生成任务正在进行');
+    }
+    if (!isConnected) await ensureConnected();
+    if (!isConnected) throw StateError('小智尚未连接，请联网后重试');
+
+    await sendAbortMessage();
+    await stopPlayback();
+    final completer = Completer<String>();
+    _silentTextCompleter = completer;
+    _silentTextBuffer = StringBuffer();
+    _silentTextReceivedStart = false;
+    _silentTextTimeout = Timer(const Duration(seconds: 90), () {
+      _finishSilentTextRequest(error: StateError('智能生成超时，请检查网络后重试'));
+    });
+    try {
+      _webSocketManager!.sendTextRequest(message);
+      final result = (await completer.future).trim();
+      if (result.isEmpty) throw StateError('小智没有返回可用的翻译内容');
+      return result;
+    } finally {
+      if (identical(_silentTextCompleter, completer)) {
+        _silentTextTimeout?.cancel();
+        _silentTextTimeout = null;
+        _silentTextCompleter = null;
+        _silentTextBuffer = null;
+        _silentTextReceivedStart = false;
+      }
+    }
+  }
+
+  void _finishSilentTextRequest({Object? error}) {
+    final completer = _silentTextCompleter;
+    if (completer == null || completer.isCompleted) return;
+    if (error != null) {
+      completer.completeError(error);
+    } else {
+      completer.complete(_silentTextBuffer?.toString() ?? '');
     }
   }
 
@@ -287,7 +338,7 @@ class XiaozhiService {
       if (Platform.isIOS || Platform.isAndroid) {
         final status = await Permission.microphone.request();
         if (status != PermissionStatus.granted) {
-          print('$TAG: 麦克风权限被拒绝');
+          logDiagnostic('$_logTag: 麦克风权限被拒绝');
           _dispatchEvent(
             XiaozhiServiceEvent(XiaozhiServiceEventType.error, '麦克风权限被拒绝'),
           );
@@ -300,10 +351,10 @@ class XiaozhiService {
       await AudioUtil.initRecorder();
       await AudioUtil.initPlayer();
 
-      print('$TAG: 正在连接 $websocketUrl');
-      print('$TAG: 设备ID: $macAddress');
-      print('$TAG: Token启用: true');
-      print('$TAG: 已启用Token认证');
+      logDiagnostic('$_logTag: 正在连接服务器');
+      logDiagnostic('$_logTag: 设备身份已配置');
+      logDiagnostic('$_logTag: Token启用: true');
+      logDiagnostic('$_logTag: 已启用Token认证');
 
       // 使用 WebSocketManager 连接
       _webSocketManager = XiaozhiWebSocketManager(
@@ -315,7 +366,7 @@ class XiaozhiService {
       _webSocketManager!.addListener(_onWebSocketEvent);
       await _webSocketManager!.connect(websocketUrl, token);
     } catch (e) {
-      print('$TAG: 连接失败: $e');
+      logDiagnostic('$_logTag: 连接失败: $e');
       rethrow;
     }
   }
@@ -341,7 +392,7 @@ class XiaozhiService {
       await disconnect();
     } catch (e) {
       // 忽略断开连接时的错误
-      print('$TAG: 结束语音通话时发生错误: $e');
+      logDiagnostic('$_logTag: 结束语音通话时发生错误: $e');
     }
   }
 
@@ -350,9 +401,9 @@ class XiaozhiService {
     try {
       final message = {'type': 'speak', 'state': 'start', 'mode': 'auto'};
       _webSocketManager?.sendMessage(jsonEncode(message));
-      print('$TAG: 已发送开始说话消息');
+      logDiagnostic('$_logTag: 已发送开始说话消息');
     } catch (e) {
-      print('$TAG: 开始说话失败: $e');
+      logDiagnostic('$_logTag: 开始说话失败: $e');
     }
   }
 
@@ -361,9 +412,9 @@ class XiaozhiService {
     try {
       final message = {'type': 'speak', 'state': 'stop', 'mode': 'auto'};
       _webSocketManager?.sendMessage(jsonEncode(message));
-      print('$TAG: 已发送停止说话消息');
+      logDiagnostic('$_logTag: 已发送停止说话消息');
     } catch (e) {
-      print('$TAG: 停止说话失败: $e');
+      logDiagnostic('$_logTag: 停止说话失败: $e');
     }
   }
 
@@ -377,13 +428,13 @@ class XiaozhiService {
         'mode': 'auto',
       };
       _webSocketManager?.sendMessage(jsonEncode(listenMessage));
-      print('$TAG: 已发送listen消息');
+      logDiagnostic('$_logTag: 已发送listen消息');
 
       // 开始录音
       _isVoiceCallActive = true;
       await AudioUtil.startRecording();
     } catch (e) {
-      print('$TAG: 发送listen消息失败: $e');
+      logDiagnostic('$_logTag: 发送listen消息失败: $e');
       _dispatchEvent(
         XiaozhiServiceEvent(XiaozhiServiceEventType.error, '发送listen消息失败: $e'),
       );
@@ -395,16 +446,16 @@ class XiaozhiService {
     try {
       // 确保已经有会话ID
       if (_sessionId == null) {
-        print('$TAG: 没有会话ID，无法开始监听，等待会话ID初始化...');
+        logDiagnostic('$_logTag: 没有会话ID，无法开始监听，等待会话ID初始化...');
         // 等待短暂时间，然后重新检查会话ID
         await Future.delayed(const Duration(milliseconds: 500));
         if (_sessionId == null) {
-          print('$TAG: 会话ID仍然为空，放弃开始监听');
+          logDiagnostic('$_logTag: 会话ID仍然为空，放弃开始监听');
           throw Exception('会话ID为空，无法开始录音');
         }
       }
 
-      print('$TAG: 使用会话ID开始录音: $_sessionId');
+      logDiagnostic('$_logTag: 使用当前会话开始录音');
 
       // 请求麦克风权限
       if (Platform.isIOS) {
@@ -412,7 +463,7 @@ class XiaozhiService {
         if (micStatus != PermissionStatus.granted) {
           final result = await Permission.microphone.request();
           if (result != PermissionStatus.granted) {
-            print('$TAG: 麦克风权限被拒绝');
+            logDiagnostic('$_logTag: 麦克风权限被拒绝');
             _dispatchEvent(
               XiaozhiServiceEvent(XiaozhiServiceEventType.error, '麦克风权限被拒绝'),
             );
@@ -426,7 +477,7 @@ class XiaozhiService {
         // Android权限请求
         final status = await Permission.microphone.request();
         if (status.isDenied) {
-          print('$TAG: 麦克风权限被拒绝');
+          logDiagnostic('$_logTag: 麦克风权限被拒绝');
           _dispatchEvent(
             XiaozhiServiceEvent(XiaozhiServiceEventType.error, '麦克风权限被拒绝'),
           );
@@ -451,9 +502,9 @@ class XiaozhiService {
         'mode': 'auto',
       };
       _webSocketManager?.sendMessage(jsonEncode(message));
-      print('$TAG: 已发送开始监听消息 (语音通话模式)');
+      logDiagnostic('$_logTag: 已发送开始监听消息 (语音通话模式)');
     } catch (e) {
-      print('$TAG: 开始监听失败: $e');
+      logDiagnostic('$_logTag: 开始监听失败: $e');
       throw Exception('开始语音输入失败: $e');
     }
   }
@@ -477,10 +528,10 @@ class XiaozhiService {
           'mode': 'auto',
         };
         _webSocketManager?.sendMessage(jsonEncode(message));
-        print('$TAG: 已发送停止监听消息 (语音通话模式)');
+        logDiagnostic('$_logTag: 已发送停止监听消息 (语音通话模式)');
       }
     } catch (e) {
-      print('$TAG: 停止监听失败: $e');
+      logDiagnostic('$_logTag: 停止监听失败: $e');
     }
   }
 
@@ -498,10 +549,10 @@ class XiaozhiService {
       if (_sessionId != null && _webSocketManager != null) {
         final message = {'session_id': _sessionId, 'type': 'abort'};
         _webSocketManager?.sendMessage(jsonEncode(message));
-        print('$TAG: 已发送中止消息');
+        logDiagnostic('$_logTag: 已发送中止消息');
       }
     } catch (e) {
-      print('$TAG: 中止监听失败: $e');
+      logDiagnostic('$_logTag: 中止监听失败: $e');
     }
   }
 
@@ -516,7 +567,7 @@ class XiaozhiService {
 
       _webSocketManager!.sendMessage(jsonEncode(request));
     } catch (e) {
-      print('$TAG: 切换静音状态失败: $e');
+      logDiagnostic('$_logTag: 切换静音状态失败: $e');
     }
   }
 
@@ -539,6 +590,7 @@ class XiaozhiService {
         _isConnected = false;
         _sessionId = null;
         _hasStartedCall = false;
+        _finishSilentTextRequest(error: StateError('小智连接已断开'));
         unawaited(_stopStreamingAfterConnectionLoss());
         _dispatchEvent(
           XiaozhiServiceEvent(XiaozhiServiceEventType.disconnected, event.data),
@@ -551,6 +603,7 @@ class XiaozhiService {
 
       case XiaozhiEventType.binaryMessage:
         final audioData = event.data as List<int>;
+        if (_silentTextCompleter != null) break;
         _dispatchEvent(
           XiaozhiServiceEvent(XiaozhiServiceEventType.audioData, audioData),
         );
@@ -569,6 +622,7 @@ class XiaozhiService {
         break;
 
       case XiaozhiEventType.error:
+        _finishSilentTextRequest(error: StateError(event.data.toString()));
         _dispatchEvent(
           XiaozhiServiceEvent(XiaozhiServiceEventType.error, event.data),
         );
@@ -594,7 +648,7 @@ class XiaozhiService {
 
   /// 处理文本消息
   void _handleTextMessage(String message) {
-    print('$TAG: 收到文本消息: $message');
+    logDiagnostic('$_logTag: 收到文本消息');
     try {
       final Map<String, dynamic> jsonData = json.decode(message);
       final String type = jsonData['type'] ?? '';
@@ -607,7 +661,7 @@ class XiaozhiService {
       // 更新会话ID（服务器在hello消息中会提供新的会话ID）
       if (jsonData['session_id'] != null) {
         _sessionId = jsonData['session_id'];
-        print('$TAG: 更新会话ID: $_sessionId');
+        logDiagnostic('$_logTag: 更新会话状态');
       }
 
       // 根据消息类型分发事件
@@ -636,7 +690,32 @@ class XiaozhiService {
           final String state = jsonData['state'] ?? '';
           final String text = jsonData['text'] ?? '';
 
+          if (_silentTextCompleter != null) {
+            if (state == 'start') {
+              _silentTextReceivedStart = true;
+            } else if (state == 'sentence_start' && text.isNotEmpty) {
+              _silentTextReceivedStart = true;
+              _silentTextBuffer?.write(text);
+            } else if (state == 'stop' && _silentTextReceivedStart) {
+              _finishSilentTextRequest();
+            }
+            break;
+          }
+
           if (state == 'start') {
+            unawaited(
+              _onlinePlayback.beginUtterance().catchError((
+                Object error,
+                StackTrace stackTrace,
+              ) {
+                _dispatchEvent(
+                  XiaozhiServiceEvent(
+                    XiaozhiServiceEventType.error,
+                    '在线音频缓冲初始化失败：$error',
+                  ),
+                );
+              }),
+            );
             _dispatchEvent(
               XiaozhiServiceEvent(XiaozhiServiceEventType.ttsStart, null),
             );
@@ -645,7 +724,7 @@ class XiaozhiService {
               XiaozhiServiceEvent(XiaozhiServiceEventType.ttsStop, null),
             );
           } else if (state == 'sentence_start' && text.isNotEmpty) {
-            print('$TAG: 收到TTS句子: $text');
+            logDiagnostic('$_logTag: 收到TTS句子');
             _dispatchEvent(
               XiaozhiServiceEvent(XiaozhiServiceEventType.assistantText, text),
             );
@@ -660,7 +739,7 @@ class XiaozhiService {
           // 处理语音识别结果
           final String text = jsonData['text'] ?? '';
           if (text.isNotEmpty) {
-            print('$TAG: 收到语音识别结果: $text');
+            logDiagnostic('$_logTag: 收到语音识别结果');
             // 先分发用户消息事件
             _dispatchEvent(
               XiaozhiServiceEvent(XiaozhiServiceEventType.userMessage, text),
@@ -672,7 +751,7 @@ class XiaozhiService {
         case 'emotion':
           final String emotion = jsonData['emotion'] ?? '';
           if (emotion.isNotEmpty) {
-            print('$TAG: 收到表情消息: $emotion');
+            logDiagnostic('$_logTag: 收到表情消息: $emotion');
             _dispatchEvent(
               XiaozhiServiceEvent(XiaozhiServiceEventType.emotion, emotion),
             );
@@ -681,23 +760,23 @@ class XiaozhiService {
 
         default:
           // 对于其他类型的消息，直接忽略
-          print('$TAG: 收到未知类型消息: $type, 原始数据: $message');
+          logDiagnostic('$_logTag: 收到未知类型消息');
       }
     } catch (e) {
-      print('$TAG: 解析消息失败: $e, 原始消息: $message');
+      logDiagnostic('$_logTag: 解析消息失败');
     }
   }
 
   /// 中断音频播放
   Future<void> stopPlayback() async {
     try {
-      print('$TAG: 正在停止音频播放');
+      logDiagnostic('$_logTag: 正在停止音频播放');
 
       await _onlinePlayback.stop();
 
-      print('$TAG: 音频播放已停止');
+      logDiagnostic('$_logTag: 音频播放已停止');
     } catch (e) {
-      print('$TAG: 停止音频播放失败: $e');
+      logDiagnostic('$_logTag: 停止音频播放失败: $e');
     }
   }
 
@@ -722,7 +801,7 @@ class XiaozhiService {
     await disconnect();
     await AudioUtil.dispose();
     _listeners.clear();
-    print('$TAG: 资源已释放');
+    logDiagnostic('$_logTag: 资源已释放');
   }
 
   /// 开始监听（按住说话模式）
@@ -734,30 +813,52 @@ class XiaozhiService {
     try {
       // 确保已经有会话ID
       if (_sessionId == null) {
-        print('$TAG: 没有会话ID，无法开始监听');
+        logDiagnostic('$_logTag: 没有会话ID，无法开始监听');
         throw Exception('服务器会话尚未准备完成');
       }
 
-      // 开始录音
-      await AudioUtil.startRecording();
-
-      // 发送开始监听命令
-      final message = {
-        'session_id': _sessionId,
-        'type': 'listen',
-        'state': 'start',
-        'mode': mode,
-      };
-      _webSocketManager?.sendMessage(jsonEncode(message));
-      print('$TAG: 已发送开始监听消息 (按住说话)');
-
-      // 设置音频流订阅
-      _audioStreamSubscription = AudioUtil.audioStream.listen((opusData) {
-        // 发送音频数据
-        _webSocketManager?.sendBinaryMessage(opusData);
-      });
+      final session = PushToTalkAudioSession(
+        playback: _onlinePlayback,
+        microphoneFrames: AudioUtil.audioStream,
+        startMicrophone: AudioUtil.startRecording,
+        stopMicrophone: () async {
+          await AudioUtil.stopRecording();
+        },
+        sendStart: () {
+          final message = {
+            'session_id': _sessionId,
+            'type': 'listen',
+            'state': 'start',
+            'mode': mode,
+          };
+          _webSocketManager?.sendMessage(jsonEncode(message));
+          logDiagnostic('$_logTag: 已发送开始监听消息 (按住说话)');
+        },
+        sendAudio: (opusData) {
+          _webSocketManager?.sendBinaryMessage(opusData);
+        },
+        sendStop: () {
+          if (_sessionId == null || _webSocketManager == null) return;
+          final message = {
+            'session_id': _sessionId,
+            'type': 'listen',
+            'state': 'stop',
+          };
+          _webSocketManager?.sendMessage(jsonEncode(message));
+          logDiagnostic('$_logTag: 已发送停止监听消息');
+        },
+      );
+      _pushToTalkSession = session;
+      try {
+        await session.start();
+      } catch (_) {
+        if (identical(_pushToTalkSession, session)) {
+          _pushToTalkSession = null;
+        }
+        rethrow;
+      }
     } catch (e) {
-      print('$TAG: 开始监听失败: $e');
+      logDiagnostic('$_logTag: 开始监听失败: $e');
       throw Exception('开始语音输入失败: $e');
     }
   }
@@ -765,25 +866,11 @@ class XiaozhiService {
   /// 停止监听（按住说话模式）
   Future<void> stopListening() async {
     try {
-      // 取消音频流订阅
-      await _audioStreamSubscription?.cancel();
-      _audioStreamSubscription = null;
-
-      // 停止录音
-      await AudioUtil.stopRecording();
-
-      // 发送停止监听命令
-      if (_sessionId != null && _webSocketManager != null) {
-        final message = {
-          'session_id': _sessionId,
-          'type': 'listen',
-          'state': 'stop',
-        };
-        _webSocketManager?.sendMessage(jsonEncode(message));
-        print('$TAG: 已发送停止监听消息');
-      }
+      final session = _pushToTalkSession;
+      _pushToTalkSession = null;
+      await session?.stop();
     } catch (e) {
-      print('$TAG: 停止监听失败: $e');
+      logDiagnostic('$_logTag: 停止监听失败: $e');
     }
   }
 
@@ -797,7 +884,7 @@ class XiaozhiService {
           'reason': 'wake_word_detected',
         };
         _webSocketManager?.sendMessage(jsonEncode(abortMessage));
-        print('$TAG: 发送中断消息: $abortMessage');
+        logDiagnostic('$_logTag: 发送中断消息');
 
         // 如果当前正在录音，短暂停顿后继续
         if (_isSpeaking) {
@@ -807,10 +894,11 @@ class XiaozhiService {
         }
       }
     } catch (e) {
-      print('$TAG: 发送中断消息失败: $e');
+      logDiagnostic('$_logTag: 发送中断消息失败: $e');
     }
   }
 
   /// 判断是否正在说话
-  bool get _isSpeaking => _audioStreamSubscription != null;
+  bool get _isSpeaking =>
+      _audioStreamSubscription != null || _pushToTalkSession != null;
 }

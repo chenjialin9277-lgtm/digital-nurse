@@ -84,8 +84,9 @@ class EducationDatabaseChannel(
 
     fun close() {
         channel.setMethodCallHandler(null)
+        // Close on the same queue after pending reads/writes have finished.
+        executor.execute { database.close() }
         executor.shutdown()
-        database.close()
     }
 
     private fun MethodCall.argumentsMap(): Map<*, *> =

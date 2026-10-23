@@ -1,0 +1,13 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+# Preserve third-party speech data and image/model source bytes for checksums.
+assets/** -text
+assets/tts/** -diff
+# Keep vendored and archived sources byte-for-byte; apply whitespace gates to
+# maintained application code rather than rewriting upstream history/resources.
+assets/avatar3d/modules/** -whitespace
+assets/avatar3d/three/** -whitespace
+assets/avatar3d/headaudio/** -whitespace
+docs/archive/** -whitespace
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.glb filter=lfs diff=lfs merge=lfs -text

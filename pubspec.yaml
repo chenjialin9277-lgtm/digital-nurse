@@ -1,7 +1,7 @@
 name: digital_nurse
 description: "A tablet-first digital nurse client for the Xiaozhi AI protocol."
 publish_to: none
-version: 0.15.1+18
+version: 0.17.0+23
 
 environment:
   sdk: ^3.7.0

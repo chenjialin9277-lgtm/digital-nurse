@@ -12,6 +12,7 @@ import '../features/education/screens/education_playback_screen.dart';
 import '../features/education/widgets/daily_language_selector.dart';
 import '../models/nurse_app_config.dart';
 import '../models/offline_speech_language.dart';
+import '../services/education_video_service.dart';
 import '../theme/nurse_theme.dart';
 import '../widgets/nurse_avatar.dart';
 import '../widgets/nurse_config_dialog.dart';
@@ -146,6 +147,8 @@ class NurseScreen extends StatelessWidget {
           (_) => NurseConfigDialog(
             initial: controller.config,
             onResetBinding: controller.resetOfficialBinding,
+            translateEducationFromMandarin:
+                controller.translateEducationFromMandarin,
           ),
     );
     if (updated != null) await controller.saveConfig(updated);
@@ -199,7 +202,40 @@ class NurseScreen extends StatelessWidget {
     BuildContext context,
     NurseController controller,
     EducationItem item,
-  ) => _openEducation(context, controller, directItem: item);
+  ) =>
+      item.isVideo
+          ? _openFavoriteVideo(context, controller, item)
+          : _openEducation(context, controller, directItem: item);
+
+  Future<void> _openFavoriteVideo(
+    BuildContext context,
+    NurseController controller,
+    EducationItem item,
+  ) async {
+    final session = controller.createBedsideEducationSession();
+    var suspended = false;
+    try {
+      await session.startSession(controller.config.offlineSpeechLanguage);
+      await session.recordVideoSelected(item);
+      await session.recordVideoPlaybackStarted(item);
+      await controller.suspendOnlineAudioForEducation();
+      suspended = true;
+      final completed = await const EducationVideoService().playVideo(
+        path: item.videoPath,
+        title: item.videoTitle,
+      );
+      if (completed) await session.recordVideoPlaybackCompleted(item);
+      await session.finishSession();
+    } catch (error) {
+      await session.clearTransientState();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('视频宣教暂时无法播放：$error')));
+    } finally {
+      if (suspended) await controller.resumeOnlineAudioAfterEducation();
+    }
+  }
 
   Future<void> _openEducation(
     BuildContext context,
@@ -736,17 +772,27 @@ class _FavoriteEducationStripState extends State<_FavoriteEducationStrip> {
         itemBuilder: (context, index) {
           final item = widget.items[index];
           final available = item.isAvailableIn(widget.language);
-          final currentTitle = item.contentFor(widget.language).title.trim();
-          final fallbackTitle = item.contents.values
-              .map((content) => content.title.trim())
-              .firstWhere((title) => title.isNotEmpty, orElse: () => '宣教项目');
+          final currentTitle = item.titleFor(widget.language);
+          final fallbackTitle =
+              item.isVideo
+                  ? '视频宣教'
+                  : item.contents.values
+                      .map((content) => content.title.trim())
+                      .firstWhere(
+                        (title) => title.isNotEmpty,
+                        orElse: () => '宣教项目',
+                      );
           final title = currentTitle.isEmpty ? fallbackTitle : currentTitle;
           return OutlinedButton.icon(
             key: ValueKey('favorite-education-${item.id}'),
             onPressed:
                 !available || _opening ? null : () => _openFavorite(item),
             icon: Icon(
-              available ? Icons.volume_up_outlined : Icons.block_outlined,
+              available
+                  ? item.isVideo
+                      ? Icons.play_circle_outline
+                      : Icons.volume_up_outlined
+                  : Icons.block_outlined,
               size: 18,
             ),
             label:

@@ -1,5 +1,3 @@
-// ignore_for_file: avoid_print, constant_identifier_names
-
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -9,32 +7,53 @@ import 'package:opus_dart/opus_dart.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter_pcm_player/flutter_pcm_player.dart';
 
+import '../services/microphone_capture_result.dart';
+import '../services/online_audio_prebuffer.dart';
+
+import 'diagnostic_log.dart';
+
 /// 音频工具类，用于处理Opus音频编解码和录制播放
 class AudioUtil {
-  static const String TAG = "AudioUtil";
-  static const int SAMPLE_RATE = 16000;
-  static const int CHANNELS = 1;
-  static const int FRAME_DURATION = 60; // 毫秒
+  static const String _logTag = "AudioUtil";
+  static const int sampleRate = 16000;
+  static const int channels = 1;
+  static const int frameDuration = 60; // 毫秒
+
+  static const RecordConfig recordConfig = RecordConfig(
+    encoder: AudioEncoder.pcm16bits,
+    sampleRate: sampleRate,
+    numChannels: channels,
+    autoGain: true,
+    echoCancel: false,
+    noiseSuppress: false,
+    androidConfig: AndroidRecordConfig(
+      manageBluetooth: false,
+      audioSource: AndroidAudioSource.voiceRecognition,
+    ),
+  );
 
   static final AudioRecorder _audioRecorder = AudioRecorder();
   static bool _isRecorderInitialized = false;
   static bool _isPlayerInitialized = false;
   static bool _isRecording = false;
+  static bool _isStoppingRecording = false;
   static bool _isPlaying = false;
   static final StreamController<Uint8List> _audioStreamController =
       StreamController<Uint8List>.broadcast();
   static StreamSubscription<Uint8List>? _recordingSubscription;
   static final List<int> _pendingPcmBytes = [];
+  static MicrophoneCaptureTracker? _captureTracker;
+  static final OnlineAudioPrebuffer _onlinePrebuffer = OnlineAudioPrebuffer();
 
   // Opus相关
   static final _encoder = SimpleOpusEncoder(
-    sampleRate: SAMPLE_RATE,
-    channels: CHANNELS,
+    sampleRate: sampleRate,
+    channels: channels,
     application: Application.voip,
   );
   static final _decoder = SimpleOpusDecoder(
-    sampleRate: SAMPLE_RATE,
-    channels: CHANNELS,
+    sampleRate: sampleRate,
+    channels: channels,
   );
 
   // FlutterPcmPlayer实例
@@ -47,34 +66,34 @@ class AudioUtil {
   static Future<void> initRecorder() async {
     if (_isRecorderInitialized) return;
 
-    print('$TAG: 开始初始化录音器');
+    logDiagnostic('$_logTag: 开始初始化录音器');
 
     // 更积极地请求所有可能需要的权限
     if (Platform.isAndroid) {
-      print('$TAG: 请求Android所需的所有权限');
+      logDiagnostic('$_logTag: 请求Android所需的所有权限');
       final status = await Permission.microphone.request();
       if (status != PermissionStatus.granted) {
-        print('$TAG: 麦克风权限被拒绝');
+        logDiagnostic('$_logTag: 麦克风权限被拒绝');
         throw Exception('需要麦克风权限');
       }
     } else {
       // iOS/其他平台只请求麦克风权限
       final status = await Permission.microphone.request();
       if (status != PermissionStatus.granted) {
-        print('$TAG: 麦克风权限被拒绝');
+        logDiagnostic('$_logTag: 麦克风权限被拒绝');
         throw Exception('需要麦克风权限');
       }
     }
 
     // 检查是否可用
-    print('$TAG: 检查PCM16编码是否支持');
+    logDiagnostic('$_logTag: 检查PCM16编码是否支持');
     final isAvailable = await _audioRecorder.isEncoderSupported(
       AudioEncoder.pcm16bits,
     );
-    print('$TAG: PCM16编码支持状态: $isAvailable');
+    logDiagnostic('$_logTag: PCM16编码支持状态: $isAvailable');
 
     // 设置音频模式 - 参考Android原生实现
-    print('$TAG: 配置音频会话');
+    logDiagnostic('$_logTag: 配置音频会话');
     final session = await AudioSession.instance;
 
     // 使用与原生Android实现更接近的配置
@@ -108,7 +127,7 @@ class AudioUtil {
     }
 
     _isRecorderInitialized = true;
-    print('$TAG: 录音器初始化成功');
+    logDiagnostic('$_logTag: 录音器初始化成功');
   }
 
   /// 初始化音频播放器
@@ -117,7 +136,7 @@ class AudioUtil {
     await stopPlaying();
 
     try {
-      print('$TAG: 使用简单方式初始化PCM播放器');
+      logDiagnostic('$_logTag: 使用简单方式初始化PCM播放器');
 
       // 创建新的播放器实例 - 完全按照官方示例的简单方式
       _pcmPlayer = FlutterPcmPlayer();
@@ -125,9 +144,9 @@ class AudioUtil {
       await _pcmPlayer!.play();
 
       _isPlayerInitialized = true;
-      print('$TAG: PCM播放器初始化成功');
+      logDiagnostic('$_logTag: PCM播放器初始化成功');
     } catch (e) {
-      print('$TAG: PCM播放器初始化失败: $e');
+      logDiagnostic('$_logTag: PCM播放器初始化失败: $e');
       _isPlayerInitialized = false;
       _pcmPlayer = null;
       rethrow;
@@ -137,11 +156,6 @@ class AudioUtil {
   /// 播放Opus音频数据
   static Future<void> playOpusData(Uint8List opusData) async {
     try {
-      // 如果播放器未初始化，先初始化
-      if (!_isPlayerInitialized || _pcmPlayer == null) {
-        await initPlayer();
-      }
-
       // 解码Opus数据
       final Int16List pcmData = _decoder.decode(input: opusData);
 
@@ -154,28 +168,38 @@ class AudioUtil {
         bytes.setInt16(i * 2, pcmData[i], Endian.little);
       }
 
-      // 直接发送到播放器
-      if (_pcmPlayer != null) {
-        await _pcmPlayer!.feed(pcmBytes);
-        _isPlaying = true;
-      }
-    } catch (e) {
-      print('$TAG: 播放失败: $e');
+      final readyFrames = _onlinePrebuffer.add(pcmBytes);
+      if (readyFrames.isEmpty) return;
 
-      // 简单重置并重新初始化
+      // Wait for several real-time packets before playback. Feeding the whole
+      // initial batch gives AudioTrack enough headroom for normal Wi-Fi jitter.
+      if (!_isPlayerInitialized || _pcmPlayer == null) {
+        await initPlayer();
+        _onlinePrebuffer.markStarted();
+      }
+      final player = _pcmPlayer;
+      if (player == null) return;
+      for (final frame in readyFrames) {
+        await player.feed(frame);
+      }
+      _isPlaying = true;
+    } catch (e) {
+      logDiagnostic('$_logTag: 播放失败: $e');
+      // Rebuffer after a player failure instead of restarting from one frame,
+      // which would immediately expose the user to another underrun.
       await stopPlaying();
-      await initPlayer();
     }
   }
 
   /// 停止播放
   static Future<void> stopPlaying() async {
+    _onlinePrebuffer.reset();
     if (_pcmPlayer != null) {
       try {
         await _pcmPlayer!.stop();
-        print('$TAG: 播放器已停止');
+        logDiagnostic('$_logTag: 播放器已停止');
       } catch (e) {
-        print('$TAG: 停止播放失败: $e');
+        logDiagnostic('$_logTag: 停止播放失败: $e');
       }
       _pcmPlayer = null;
       _isPlayerInitialized = false;
@@ -187,7 +211,7 @@ class AudioUtil {
   static Future<void> dispose() async {
     await stopRecording();
     await stopPlaying();
-    print('$TAG: 资源已释放');
+    logDiagnostic('$_logTag: 资源已释放');
   }
 
   /// 开始录音
@@ -199,88 +223,102 @@ class AudioUtil {
     if (_isRecording) return;
 
     try {
-      print('$TAG: 尝试启动录音');
+      logDiagnostic('$_logTag: 尝试启动录音');
 
       // 确保麦克风权限已获取 - 使用不同方式检查权限
       final status = await Permission.microphone.status;
-      print('$TAG: 麦克风权限状态: $status');
+      logDiagnostic('$_logTag: 麦克风权限状态: $status');
 
       if (status != PermissionStatus.granted) {
         final result = await Permission.microphone.request();
-        print('$TAG: 请求麦克风权限结果: $result');
+        logDiagnostic('$_logTag: 请求麦克风权限结果: $result');
         if (result != PermissionStatus.granted) {
-          print('$TAG: 麦克风权限被拒绝');
-          return;
+          logDiagnostic('$_logTag: 麦克风权限被拒绝');
+          throw Exception('需要麦克风权限');
         }
       }
 
       // 尝试直接使用音频流
       try {
-        print('$TAG: 尝试启动流式录音');
-        final stream = await _audioRecorder.startStream(
-          const RecordConfig(
-            encoder: AudioEncoder.pcm16bits,
-            sampleRate: SAMPLE_RATE,
-            numChannels: CHANNELS,
-          ),
-        );
+        logDiagnostic('$_logTag: 尝试启动流式录音');
+        _captureTracker = MicrophoneCaptureTracker();
+        final stream = await _audioRecorder.startStream(recordConfig);
 
         _isRecording = true;
-        print('$TAG: 流式录音启动成功');
+        _isStoppingRecording = false;
+        logDiagnostic('$_logTag: 流式录音启动成功');
 
         _pendingPcmBytes.clear();
         _recordingSubscription = stream.listen(
           (data) {
             if (data.isEmpty) return;
             _pendingPcmBytes.addAll(data);
-            const frameBytes = SAMPLE_RATE * FRAME_DURATION ~/ 1000 * 2;
+            const frameBytes = sampleRate * frameDuration ~/ 1000 * 2;
             while (_pendingPcmBytes.length >= frameBytes) {
               final frame = Uint8List.fromList(
                 _pendingPcmBytes.sublist(0, frameBytes),
               );
               _pendingPcmBytes.removeRange(0, frameBytes);
+              _captureTracker?.addPcmFrame(frame);
               final opusData = encodeToOpus(frame);
-              if (opusData != null) _audioStreamController.add(opusData);
+              if (opusData != null) {
+                _captureTracker?.markEncodedFrame();
+                _audioStreamController.add(opusData);
+              }
             }
           },
           onError: (error) {
-            print('$TAG: 音频流错误: $error');
+            logDiagnostic('$_logTag: 音频流错误: $error');
+            _captureTracker?.markStreamError(error);
             _isRecording = false;
           },
           onDone: () {
-            print('$TAG: 音频流结束');
+            logDiagnostic('$_logTag: 音频流结束');
+            if (!_isStoppingRecording) {
+              _captureTracker?.markStreamError(StateError('音频流在停止请求前结束'));
+            }
             _isRecording = false;
           },
         );
       } catch (e) {
-        print('$TAG: 流式录音失败: $e');
+        logDiagnostic('$_logTag: 流式录音失败: $e');
         _isRecording = false;
         rethrow;
       }
     } catch (e, stackTrace) {
-      print('$TAG: 启动录音失败: $e');
-      print(stackTrace);
+      logDiagnostic('$_logTag: 启动录音失败: $e');
+      logDiagnostic(stackTrace);
       _isRecording = false;
+      _isStoppingRecording = false;
+      _captureTracker = null;
+      rethrow;
     }
   }
 
   /// 停止录音
-  static Future<String?> stopRecording() async {
-    if (!_isRecorderInitialized || !_isRecording) return null;
-
-    // 停止录音
+  static Future<MicrophoneCaptureResult> stopRecording() async {
+    final tracker = _captureTracker ?? MicrophoneCaptureTracker();
+    _isStoppingRecording = true;
     try {
-      final path = await _audioRecorder.stop();
+      if (_isRecorderInitialized) await _audioRecorder.stop();
       await _recordingSubscription?.cancel();
+      final result = tracker.finish();
+      logDiagnostic(
+        '$_logTag: 停止录音，PCM字节=${result.pcmByteCount}，'
+        '编码帧=${result.encodedFrameCount}，有效帧=${result.voicedFrameCount}，'
+        '峰值=${result.peakAmplitude}，流错误=${result.streamFailed}',
+      );
+      return result;
+    } catch (error) {
+      logDiagnostic('$_logTag: 停止录音失败: $error');
+      tracker.markStreamError(error);
+      return tracker.finish();
+    } finally {
       _recordingSubscription = null;
       _pendingPcmBytes.clear();
+      _captureTracker = null;
       _isRecording = false;
-      print('$TAG: 停止录音: $path');
-      return path;
-    } catch (e) {
-      print('$TAG: 停止录音失败: $e');
-      _isRecording = false;
-      return null;
+      _isStoppingRecording = false;
     }
   }
 
@@ -297,7 +335,7 @@ class AudioUtil {
       );
 
       // 确保数据长度符合Opus要求（必须是2.5ms、5ms、10ms、20ms、40ms或60ms的采样数）
-      final int samplesPerFrame = (SAMPLE_RATE * FRAME_DURATION) ~/ 1000;
+      final int samplesPerFrame = (sampleRate * frameDuration) ~/ 1000;
 
       Uint8List encoded;
 
@@ -320,8 +358,8 @@ class AudioUtil {
 
       return encoded;
     } catch (e, stackTrace) {
-      print('$TAG: Opus编码失败: $e');
-      print(stackTrace);
+      logDiagnostic('$_logTag: Opus编码失败: $e');
+      logDiagnostic(stackTrace);
       return null;
     }
   }

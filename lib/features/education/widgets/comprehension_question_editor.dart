@@ -25,6 +25,7 @@ class ComprehensionQuestionEditorState
   late final TextEditingController _question;
   late final TextEditingController _explanation;
   late final List<TextEditingController> _options;
+  final List<TextEditingController> _retiredOptions = [];
   late int _correctIndex;
 
   @override
@@ -51,6 +52,9 @@ class ComprehensionQuestionEditorState
     for (final controller in _options) {
       controller.dispose();
     }
+    for (final controller in _retiredOptions) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -58,6 +62,27 @@ class ComprehensionQuestionEditorState
   String get explanation => _explanation.text.trim();
   List<String> get options => _options.map((item) => item.text.trim()).toList();
   int get correctIndex => _correctIndex;
+
+  void replaceWith(EducationLanguageContent content) {
+    setState(() {
+      _question.text = content.question;
+      _explanation.text = content.explanation;
+      while (_options.length < content.options.length) {
+        _options.add(TextEditingController());
+      }
+      while (_options.length > content.options.length) {
+        _retiredOptions.add(_options.removeLast());
+      }
+      while (_options.length < 2) {
+        _options.add(TextEditingController());
+      }
+      for (var index = 0; index < content.options.length; index++) {
+        _options[index].text = content.options[index];
+      }
+      _correctIndex = content.correctIndex.clamp(0, _options.length - 1);
+    });
+    widget.onChanged();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -159,7 +184,7 @@ class ComprehensionQuestionEditorState
   void _removeOption(int index) {
     if (_options.length <= 2) return;
     setState(() {
-      _options.removeAt(index).dispose();
+      _retiredOptions.add(_options.removeAt(index));
       if (_correctIndex == index) _correctIndex = 0;
       if (_correctIndex > index) _correctIndex -= 1;
     });

@@ -18,6 +18,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.WindowManager
@@ -25,17 +26,16 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.EventChannel
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 class MainActivity : FlutterActivity() {
     private val logoPickerRequestCode = 4102
     private val legacyExcelSaveRequestCode = 4103
     private val nurseAvatarPickerRequestCode = 4104
+    private val educationVideoPickerRequestCode = 4105
+    private val educationVideoPlaybackRequestCode = 4106
     private val systemChannel = "digital_nurse/system"
     private val networkChannel = "digital_nurse/network_status"
     private val localTtsChannel = "digital_nurse/local_tts_status"
@@ -50,6 +50,8 @@ class MainActivity : FlutterActivity() {
     private var pendingLogoResult: MethodChannel.Result? = null
     private var pendingNurseAvatarResult: MethodChannel.Result? = null
     private var pendingExcelResult: MethodChannel.Result? = null
+    private var pendingEducationVideoResult: MethodChannel.Result? = null
+    private var pendingVideoPlaybackResult: MethodChannel.Result? = null
     private var pendingExcelBytes: ByteArray? = null
     private var educationDatabaseChannel: EducationDatabaseChannel? = null
 
@@ -93,6 +95,21 @@ class MainActivity : FlutterActivity() {
                     }
                     "pickDepartmentLogo" -> openDepartmentLogoPicker(result)
                     "pickNurseAvatar" -> openNurseAvatarPicker(result)
+                    "pickEducationVideo" -> openEducationVideoPicker(result)
+                    "playEducationVideo" -> {
+                        val path = call.argument<String>("path")
+                        val title = call.argument<String>("title") ?: "宣教示范视频"
+                        playEducationVideo(path, title, result)
+                    }
+                    "deleteEducationVideo" -> {
+                        val path = call.argument<String>("path")
+                        try {
+                            deleteEducationVideo(path)
+                            result.success(null)
+                        } catch (error: Exception) {
+                            result.error("VIDEO_DELETE_FAILED", error.message, null)
+                        }
+                    }
                     "saveUsageXlsx" -> {
                         val fileName = call.argument<String>("fileName")
                         val summaryRows = call.argument<List<List<Any?>>>("summaryRows")
@@ -107,7 +124,7 @@ class MainActivity : FlutterActivity() {
                             result.error("EMPTY_REPORT", "表格内容为空", null)
                         } else {
                             try {
-                                val bytes = buildXlsx(
+                                val bytes = UsageXlsxWriter.build(
                                     summaryRows,
                                     detailRows,
                                     educationSummaryRows,
@@ -187,6 +204,69 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun openEducationVideoPicker(result: MethodChannel.Result) {
+        if (pendingEducationVideoResult != null) {
+            result.error("PICKER_BUSY", "已有视频选择窗口正在打开", null)
+            return
+        }
+        pendingEducationVideoResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            startActivityForResult(intent, educationVideoPickerRequestCode)
+        } catch (error: Exception) {
+            pendingEducationVideoResult = null
+            result.error("PICKER_UNAVAILABLE", error.message, null)
+        }
+    }
+
+    private fun playEducationVideo(
+        path: String?,
+        title: String,
+        result: MethodChannel.Result,
+    ) {
+        if (pendingVideoPlaybackResult != null) {
+            result.error("VIDEO_BUSY", "已有视频正在播放", null)
+            return
+        }
+        if (path.isNullOrBlank()) {
+            result.error("VIDEO_MISSING", "未配置示范视频", null)
+            return
+        }
+        try {
+            val videoRoot = File(filesDir, "education_videos").canonicalFile
+            val video = File(path).canonicalFile
+            if (!video.path.startsWith(videoRoot.path + File.separator) || !video.isFile) {
+                result.error("VIDEO_MISSING", "视频文件已丢失，请在宣教管理中重新导入", null)
+                return
+            }
+            pendingVideoPlaybackResult = result
+            val intent = Intent(this, EducationVideoActivity::class.java).apply {
+                putExtra(EducationVideoActivity.EXTRA_VIDEO_PATH, video.absolutePath)
+                putExtra(EducationVideoActivity.EXTRA_VIDEO_TITLE, title)
+            }
+            startActivityForResult(intent, educationVideoPlaybackRequestCode)
+        } catch (error: Exception) {
+            pendingVideoPlaybackResult = null
+            result.error("VIDEO_OPEN_FAILED", error.message, null)
+        }
+    }
+
+    private fun deleteEducationVideo(path: String?) {
+        if (path.isNullOrBlank()) return
+        val videoRoot = File(filesDir, "education_videos").canonicalFile
+        val video = File(path).canonicalFile
+        if (!video.path.startsWith(videoRoot.path + File.separator)) {
+            throw IllegalArgumentException("不能删除APP视频目录以外的文件")
+        }
+        if (video.exists() && !video.delete()) {
+            throw IllegalStateException("视频文件删除失败")
+        }
+    }
+
     @Deprecated("Deprecated in Android API")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -215,6 +295,48 @@ class MainActivity : FlutterActivity() {
                     result?.success(copyStandardNurseAvatar(data.data!!))
                 } catch (error: Exception) {
                     result?.error("AVATAR_STANDARD_FAILED", error.message, null)
+                }
+            }
+            educationVideoPickerRequestCode -> {
+                val result = pendingEducationVideoResult
+                if (resultCode != Activity.RESULT_OK || data?.data == null) {
+                    pendingEducationVideoResult = null
+                    result?.success(null)
+                    return
+                }
+                val uri = data.data!!
+                Thread {
+                    try {
+                        val path = copyEducationVideo(uri)
+                        mainHandler.post {
+                            pendingEducationVideoResult = null
+                            result?.success(path)
+                        }
+                    } catch (error: Exception) {
+                        mainHandler.post {
+                            pendingEducationVideoResult = null
+                            result?.error("VIDEO_COPY_FAILED", error.message, null)
+                        }
+                    }
+                }.start()
+            }
+            educationVideoPlaybackRequestCode -> {
+                val result = pendingVideoPlaybackResult
+                pendingVideoPlaybackResult = null
+                if (resultCode == EducationVideoActivity.RESULT_PLAYBACK_ERROR) {
+                    result?.error(
+                        "VIDEO_PLAYBACK_FAILED",
+                        data?.getStringExtra(EducationVideoActivity.EXTRA_ERROR_MESSAGE)
+                            ?: "视频无法播放，请确认为H.264 + AAC编码的MP4文件",
+                        null,
+                    )
+                } else {
+                    result?.success(
+                        data?.getBooleanExtra(
+                            EducationVideoActivity.EXTRA_PLAYBACK_COMPLETED,
+                            false,
+                        ) ?: false,
+                    )
                 }
             }
             legacyExcelSaveRequestCode -> {
@@ -265,6 +387,58 @@ class MainActivity : FlutterActivity() {
         if (processed !== bitmap) processed.recycle()
         bitmap.recycle()
         return destination.absolutePath
+    }
+
+    private fun copyEducationVideo(uri: Uri): String {
+        val displayName = queryOpenableValue(uri, OpenableColumns.DISPLAY_NAME) ?: ""
+        val mime = contentResolver.getType(uri)?.lowercase(Locale.ROOT) ?: ""
+        if (mime != "video/mp4" && !displayName.lowercase(Locale.ROOT).endsWith(".mp4")) {
+            throw IllegalArgumentException("为保证平板兼容性，请选择MP4视频（H.264 + AAC）")
+        }
+        val declaredSize = queryOpenableValue(uri, OpenableColumns.SIZE)?.toLongOrNull()
+        val maximumBytes = 1024L * 1024L * 1024L
+        if (declaredSize != null && declaredSize > maximumBytes) {
+            throw IllegalArgumentException("视频不能超过1GB，建议压缩到500MB以内")
+        }
+        val directory = File(filesDir, "education_videos").apply { mkdirs() }
+        if (declaredSize != null && directory.usableSpace < declaredSize + 100L * 1024L * 1024L) {
+            throw IllegalStateException("平板剩余存储空间不足，请先清理空间")
+        }
+        val destination = File(directory, "education_video_${System.currentTimeMillis()}.mp4")
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(destination).use { output ->
+                    val buffer = ByteArray(256 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        if (total > maximumBytes) {
+                            throw IllegalArgumentException("视频不能超过1GB")
+                        }
+                        output.write(buffer, 0, read)
+                    }
+                    output.fd.sync()
+                }
+            } ?: throw IllegalArgumentException("无法读取所选视频")
+        } catch (error: Exception) {
+            destination.delete()
+            throw error
+        }
+        if (destination.length() == 0L) {
+            destination.delete()
+            throw IllegalArgumentException("所选视频为空文件")
+        }
+        return destination.absolutePath
+    }
+
+    private fun queryOpenableValue(uri: Uri, column: String): String? {
+        return contentResolver.query(uri, arrayOf(column), null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val index = cursor.getColumnIndex(column)
+            if (index < 0 || cursor.isNull(index)) null else cursor.getString(index)
+        }
     }
 
     private fun copyStandardNurseAvatar(uri: Uri): String {
@@ -519,184 +693,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun buildXlsx(
-        summaryRows: List<List<Any?>>,
-        detailRows: List<List<Any?>>,
-        educationSummaryRows: List<List<Any?>>?,
-        comprehensionRows: List<List<Any?>>?,
-        educationEventRows: List<List<Any?>>?,
-    ): ByteArray {
-        val sheets = mutableListOf(
-            XlsxSheet("统计汇总", summaryRows, true),
-            XlsxSheet("使用明细", detailRows, false),
-        )
-        if (educationSummaryRows != null &&
-            comprehensionRows != null &&
-            educationEventRows != null
-        ) {
-            sheets += XlsxSheet("床旁宣教汇总", educationSummaryRows, true)
-            sheets += XlsxSheet("理解确认", comprehensionRows, false)
-            sheets += XlsxSheet("宣教事件明细", educationEventRows, false)
-        }
-        val output = ByteArrayOutputStream()
-        ZipOutputStream(output).use { zip ->
-            addZipEntry(zip, "[Content_Types].xml", contentTypesXml(sheets.size))
-            addZipEntry(zip, "_rels/.rels", rootRelationshipsXml())
-            addZipEntry(zip, "xl/workbook.xml", workbookXml(sheets))
-            addZipEntry(
-                zip,
-                "xl/_rels/workbook.xml.rels",
-                workbookRelationshipsXml(sheets.size),
-            )
-            addZipEntry(zip, "xl/styles.xml", stylesXml())
-            sheets.forEachIndexed { index, sheet ->
-                addZipEntry(
-                    zip,
-                    "xl/worksheets/sheet${index + 1}.xml",
-                    worksheetXml(sheet.rows, summarySheet = sheet.summary),
-                )
-            }
-        }
-        return output.toByteArray()
-    }
-
-    private data class XlsxSheet(
-        val name: String,
-        val rows: List<List<Any?>>,
-        val summary: Boolean,
-    )
-
-    private fun addZipEntry(zip: ZipOutputStream, path: String, content: String) {
-        zip.putNextEntry(ZipEntry(path))
-        zip.write(content.toByteArray(Charsets.UTF_8))
-        zip.closeEntry()
-    }
-
-    private fun contentTypesXml(sheetCount: Int): String {
-        val worksheets = (1..sheetCount).joinToString("") { index ->
-            "<Override PartName=\"/xl/worksheets/sheet$index.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/>"
-        }
-        return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-          <Default Extension="xml" ContentType="application/xml"/>
-          <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-          $worksheets
-          <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-        </Types>""".trimIndent()
-    }
-
-    private fun rootRelationshipsXml() = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-        </Relationships>""".trimIndent()
-
-    private fun workbookXml(sheets: List<XlsxSheet>): String {
-        val sheetNodes = sheets.mapIndexed { index, sheet ->
-            "<sheet name=\"${escapeXml(sheet.name)}\" sheetId=\"${index + 1}\" r:id=\"rId${index + 1}\"/>"
-        }.joinToString("")
-        return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-          <sheets>
-            $sheetNodes
-          </sheets>
-        </workbook>""".trimIndent()
-    }
-
-    private fun workbookRelationshipsXml(sheetCount: Int): String {
-        val worksheetRelationships = (1..sheetCount).joinToString("") { index ->
-            "<Relationship Id=\"rId$index\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet$index.xml\"/>"
-        }
-        return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-          $worksheetRelationships
-          <Relationship Id="rId${sheetCount + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-        </Relationships>""".trimIndent()
-    }
-
-    private fun stylesXml() = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <fonts count="3">
-            <font><sz val="11"/><name val="等线"/></font>
-            <font><b/><sz val="15"/><color rgb="FF0B5870"/><name val="等线"/></font>
-            <font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="等线"/></font>
-          </fonts>
-          <fills count="3">
-            <fill><patternFill patternType="none"/></fill>
-            <fill><patternFill patternType="gray125"/></fill>
-            <fill><patternFill patternType="solid"><fgColor rgb="FF087F8C"/><bgColor indexed="64"/></patternFill></fill>
-          </fills>
-          <borders count="2">
-            <border><left/><right/><top/><bottom/><diagonal/></border>
-            <border><left style="thin"><color rgb="FFD4E3E6"/></left><right style="thin"><color rgb="FFD4E3E6"/></right><top style="thin"><color rgb="FFD4E3E6"/></top><bottom style="thin"><color rgb="FFD4E3E6"/></bottom><diagonal/></border>
-          </borders>
-          <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-          <cellXfs count="4">
-            <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0"><alignment vertical="center"/></xf>
-            <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"><alignment horizontal="center" vertical="center"/></xf>
-            <xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0"><alignment horizontal="center" vertical="center"/></xf>
-            <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0"><alignment horizontal="center" vertical="center"/></xf>
-          </cellXfs>
-          <cellStyles count="1"><cellStyle name="常规" xfId="0" builtinId="0"/></cellStyles>
-        </styleSheet>""".trimIndent()
-
-    private fun worksheetXml(rows: List<List<Any?>>, summarySheet: Boolean): String {
-        val xml = StringBuilder()
-        xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
-        xml.append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">")
-        if (!summarySheet) {
-            xml.append("<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>")
-        }
-        xml.append(
-            if (summarySheet) {
-                "<cols><col min=\"1\" max=\"1\" width=\"24\" customWidth=\"1\"/><col min=\"2\" max=\"2\" width=\"44\" customWidth=\"1\"/></cols>"
-            } else {
-                "<cols><col min=\"1\" max=\"1\" width=\"9\" customWidth=\"1\"/><col min=\"2\" max=\"2\" width=\"16\" customWidth=\"1\"/><col min=\"3\" max=\"3\" width=\"14\" customWidth=\"1\"/><col min=\"4\" max=\"4\" width=\"20\" customWidth=\"1\"/></cols>"
-            },
-        )
-        xml.append("<sheetData>")
-        rows.forEachIndexed { rowIndex, row ->
-            val excelRow = rowIndex + 1
-            val isTitle = summarySheet && rowIndex == 0
-            val isHeader =
-                (!summarySheet && rowIndex == 0) ||
-                    (summarySheet && row.firstOrNull()?.toString() == "统计项目")
-            xml.append("<row r=\"$excelRow\"${if (isTitle) " ht=\"25\" customHeight=\"1\"" else ""}>")
-            row.forEachIndexed { columnIndex, value ->
-                val reference = "${columnName(columnIndex)}$excelRow"
-                val style = if (isTitle) 1 else if (isHeader) 2 else if (!summarySheet) 3 else 0
-                if (value is Number) {
-                    xml.append("<c r=\"$reference\" s=\"$style\"><v>$value</v></c>")
-                } else {
-                    xml.append("<c r=\"$reference\" s=\"$style\" t=\"inlineStr\"><is><t>${escapeXml(value?.toString() ?: "")}</t></is></c>")
-                }
-            }
-            xml.append("</row>")
-        }
-        xml.append("</sheetData>")
-        if (summarySheet) xml.append("<mergeCells count=\"1\"><mergeCell ref=\"A1:B1\"/></mergeCells>")
-        xml.append("</worksheet>")
-        return xml.toString()
-    }
-
-    private fun columnName(index: Int): String {
-        var value = index + 1
-        val name = StringBuilder()
-        while (value > 0) {
-            val remainder = (value - 1) % 26
-            name.insert(0, ('A'.code + remainder).toChar())
-            value = (value - 1) / 26
-        }
-        return name.toString()
-    }
-
-    private fun escapeXml(value: String): String =
-        value.replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&apos;")
-
     override fun onDestroy() {
         unregisterNetworkMonitor()
         educationDatabaseChannel?.close()
@@ -712,6 +708,10 @@ class MainActivity : FlutterActivity() {
         pendingExcelResult?.error("ACTIVITY_CLOSED", "页面已关闭", null)
         pendingExcelResult = null
         pendingExcelBytes = null
+        pendingEducationVideoResult?.error("ACTIVITY_CLOSED", "页面已关闭", null)
+        pendingEducationVideoResult = null
+        pendingVideoPlaybackResult?.error("ACTIVITY_CLOSED", "页面已关闭", null)
+        pendingVideoPlaybackResult = null
         super.onDestroy()
     }
 }

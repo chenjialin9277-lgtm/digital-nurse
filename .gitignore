@@ -101,3 +101,32 @@ coverage/
 # Local configuration
 .env*
 !.env.example
+
+# Private signing material and local credentials
+**/key.properties
+*.jks
+*.keystore
+*.pem
+*.p12
+*.pfx
+
+# Reproducible caches, build output and failed golden comparisons
+**/node_modules/
+**/.vitepress/cache/
+**/.vitepress/dist/
+**/build/
+# three.js ships its actual JavaScript source bundles in this directory.
+!assets/avatar3d/three/build/
+!assets/avatar3d/three/build/**
+android/.kotlin/
+test/failures/
+assets/tts/downloads/
+.superpowers/
+.vscode/
+
+# Local delivery packages and backups
+*.apk
+*.aab
+*.ipa
+*.tar.gz
+*.zip

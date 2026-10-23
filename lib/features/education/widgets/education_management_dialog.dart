@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
 
 import '../../../models/offline_speech_language.dart';
+import '../../../services/education_video_service.dart';
 import '../data/education_repository.dart';
 import '../models/education_item.dart';
+import '../services/education_translation_service.dart';
 import 'education_item_editor.dart';
+import 'video_education_item_editor.dart';
 
 class EducationManagementDialog extends StatefulWidget {
-  const EducationManagementDialog({super.key, required this.repository});
+  const EducationManagementDialog({
+    super.key,
+    required this.repository,
+    this.videoService = const EducationVideoService(),
+    this.translateFromMandarin,
+  });
 
   final EducationRepository repository;
+  final EducationVideoService videoService;
+  final EducationTranslationCallback? translateFromMandarin;
 
   @override
   State<EducationManagementDialog> createState() =>
@@ -27,12 +37,17 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
   }
 
   Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
       final items = await widget.repository.loadAll();
       if (!mounted) return;
       setState(() {
         _items = items;
         _loading = false;
+        _error = null;
       });
     } catch (error) {
       if (!mounted) return;
@@ -60,9 +75,14 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
       ),
       actions: [
         FilledButton.tonalIcon(
-          onPressed: _loading ? null : _add,
-          icon: const Icon(Icons.add),
-          label: const Text('新增宣教'),
+          onPressed: _loading ? null : _addText,
+          icon: const Icon(Icons.article_outlined),
+          label: const Text('新增文字宣教'),
+        ),
+        FilledButton.tonalIcon(
+          onPressed: _loading ? null : _addVideo,
+          icon: const Icon(Icons.ondemand_video_outlined),
+          label: const Text('新增视频宣教'),
         ),
         FilledButton(
           onPressed: () => Navigator.maybePop(context, _items),
@@ -88,7 +108,7 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
       );
     }
     if (_items.isEmpty) {
-      return const Center(child: Text('尚未配置宣教，请点击“新增宣教”'));
+      return const Center(child: Text('尚未配置宣教，请新增文字宣教或视频宣教'));
     }
     return ReorderableListView.builder(
       itemCount: _items.length,
@@ -111,7 +131,9 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
           ),
         ),
         title: Text(
-          mandarin.title.isEmpty ? '未命名草稿' : mandarin.title,
+          item.isVideo
+              ? (item.videoTitle.isEmpty ? '未命名视频' : item.videoTitle)
+              : (mandarin.title.isEmpty ? '未命名草稿' : mandarin.title),
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         subtitle: Wrap(
@@ -119,14 +141,30 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
           runSpacing: 4,
           children: [
             Text(item.category),
-            ...OfflineSpeechLanguage.values.map((language) {
-              final available = item.isAvailableIn(language);
-              return Chip(
+            Chip(
+              visualDensity: VisualDensity.compact,
+              avatar: Icon(
+                item.isVideo
+                    ? Icons.ondemand_video_outlined
+                    : Icons.article_outlined,
+                size: 17,
+              ),
+              label: Text(item.isVideo ? '视频宣教' : '文字宣教'),
+            ),
+            if (item.isText)
+              ...OfflineSpeechLanguage.values.map((language) {
+                final available = item.isAvailableIn(language);
+                return Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text('${language.label}${available ? '已发布' : '未发布'}'),
+                );
+              }),
+            if (item.isVideo)
+              Chip(
                 visualDensity: VisualDensity.compact,
-                label: Text('${language.label}${available ? '已发布' : '未发布'}'),
-              );
-            }),
-            if (mandarin.needsReview)
+                label: Text(item.videoPath.isEmpty ? '未导入视频' : '已保存到本机'),
+              ),
+            if (item.isText && mandarin.needsReview)
               const Chip(
                 visualDensity: VisualDensity.compact,
                 avatar: Icon(Icons.warning_amber, size: 17),
@@ -149,11 +187,12 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
                 onPressed: () => _edit(item),
                 icon: const Icon(Icons.edit_outlined),
               ),
-              IconButton(
-                tooltip: '复制',
-                onPressed: () => _copy(item),
-                icon: const Icon(Icons.copy_outlined),
-              ),
+              if (item.isText)
+                IconButton(
+                  tooltip: '复制',
+                  onPressed: () => _copy(item),
+                  icon: const Icon(Icons.copy_outlined),
+                ),
               Switch.adaptive(
                 key: Key('education-enabled-${item.id}'),
                 value: item.enabled,
@@ -171,11 +210,31 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
     );
   }
 
-  Future<void> _add() async {
+  Future<void> _addText() async {
     final item = await showDialog<EducationItem>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => EducationItemEditor(sortOrder: _nextSortOrder),
+      builder:
+          (_) => EducationItemEditor(
+            sortOrder: _nextSortOrder,
+            translateFromMandarin: widget.translateFromMandarin,
+          ),
+    );
+    if (item == null || !mounted) return;
+    await widget.repository.save(item);
+    if (!mounted) return;
+    setState(() => _items = [..._items, item]);
+  }
+
+  Future<void> _addVideo() async {
+    final item = await showDialog<EducationItem>(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (_) => VideoEducationItemEditor(
+            sortOrder: _nextSortOrder,
+            videoService: widget.videoService,
+          ),
     );
     if (item == null || !mounted) return;
     await widget.repository.save(item);
@@ -188,13 +247,28 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
       context: context,
       barrierDismissible: false,
       builder:
-          (_) => EducationItemEditor(
-            initial: initial,
-            sortOrder: initial.sortOrder,
-          ),
+          (_) =>
+              initial.isVideo
+                  ? VideoEducationItemEditor(
+                    initial: initial,
+                    sortOrder: initial.sortOrder,
+                    videoService: widget.videoService,
+                  )
+                  : EducationItemEditor(
+                    initial: initial,
+                    sortOrder: initial.sortOrder,
+                    translateFromMandarin: widget.translateFromMandarin,
+                  ),
     );
     if (item == null || !mounted) return;
     await widget.repository.save(item);
+    if (initial.isVideo &&
+        initial.videoPath.isNotEmpty &&
+        initial.videoPath != item.videoPath) {
+      await widget.videoService
+          .deleteVideo(initial.videoPath)
+          .catchError((_) {});
+    }
     if (!mounted) return;
     setState(() {
       _items =
@@ -211,14 +285,19 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
       version: 1,
       createdAt: now,
       updatedAt: now,
-      contents: {
-        for (final entry in source.contents.entries)
-          entry.key: entry.value.copyWith(
-            title: '${entry.value.title}（副本）',
-            published: false,
-            needsReview: true,
-          ),
-      },
+      videoTitle:
+          source.isVideo ? '${source.videoTitle}（副本）' : source.videoTitle,
+      contents:
+          source.isVideo
+              ? const {}
+              : {
+                for (final entry in source.contents.entries)
+                  entry.key: entry.value.copyWith(
+                    title: '${entry.value.title}（副本）',
+                    published: false,
+                    needsReview: true,
+                  ),
+              },
     );
     await widget.repository.save(copy);
     if (!mounted) return;
@@ -250,6 +329,9 @@ class _EducationManagementDialogState extends State<EducationManagementDialog> {
 
   Future<void> _delete(EducationItem item) async {
     await widget.repository.softDelete(item.id);
+    if (item.isVideo && item.videoPath.isNotEmpty) {
+      await widget.videoService.deleteVideo(item.videoPath).catchError((_) {});
+    }
     if (!mounted) return;
     setState(
       () => _items = _items.where((value) => value.id != item.id).toList(),

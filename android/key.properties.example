@@ -1,0 +1,6 @@
+# Copy to key.properties and fill in values received privately from the owner.
+# Relative storeFile paths resolve from android/app/.
+storeFile=digital-nurse-release.jks
+storePassword=
+keyAlias=
+keyPassword=

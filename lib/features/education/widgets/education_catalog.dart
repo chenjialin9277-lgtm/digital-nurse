@@ -5,6 +5,8 @@ import '../models/education_item.dart';
 
 enum EducationCatalogView { all, favorites, recent }
 
+enum EducationCatalogKind { all, text, video }
+
 class EducationCatalog extends StatefulWidget {
   const EducationCatalog({
     super.key,
@@ -26,6 +28,7 @@ class EducationCatalog extends StatefulWidget {
 class _EducationCatalogState extends State<EducationCatalog> {
   final _searchController = TextEditingController();
   EducationCatalogView _view = EducationCatalogView.all;
+  EducationCatalogKind _kind = EducationCatalogKind.all;
   String? _category;
   String _query = '';
 
@@ -76,6 +79,32 @@ class _EducationCatalogState extends State<EducationCatalog> {
                 selected: _view == EducationCatalogView.all,
                 onSelected:
                     () => setState(() => _view = EducationCatalogView.all),
+              ),
+              _ViewChip(
+                label: '文字宣教',
+                icon: Icons.article_outlined,
+                selected: _kind == EducationCatalogKind.text,
+                onSelected:
+                    () => setState(
+                      () =>
+                          _kind =
+                              _kind == EducationCatalogKind.text
+                                  ? EducationCatalogKind.all
+                                  : EducationCatalogKind.text,
+                    ),
+              ),
+              _ViewChip(
+                label: '视频宣教',
+                icon: Icons.ondemand_video_outlined,
+                selected: _kind == EducationCatalogKind.video,
+                onSelected:
+                    () => setState(
+                      () =>
+                          _kind =
+                              _kind == EducationCatalogKind.video
+                                  ? EducationCatalogKind.all
+                                  : EducationCatalogKind.video,
+                    ),
               ),
               _ViewChip(
                 label: '常用',
@@ -158,6 +187,8 @@ class _EducationCatalogState extends State<EducationCatalog> {
           if (_view == EducationCatalogView.favorites && !item.favorite) {
             return false;
           }
+          if (_kind == EducationCatalogKind.text && item.isVideo) return false;
+          if (_kind == EducationCatalogKind.video && item.isText) return false;
           if (_view == EducationCatalogView.recent &&
               !recentOrder.containsKey(item.id)) {
             return false;
@@ -167,9 +198,11 @@ class _EducationCatalogState extends State<EducationCatalog> {
           final content = item.contentFor(widget.language);
           final available = item.isAvailableIn(widget.language);
           final haystack =
-              '${available ? content.title : ''}\n'
-                      '${available ? content.summary : ''}\n${item.category}'
-                  .toLowerCase();
+              item.isVideo
+                  ? '${item.videoTitle}\n${item.category}'.toLowerCase()
+                  : '${available ? content.title : ''}\n'
+                          '${available ? content.summary : ''}\n${item.category}'
+                      .toLowerCase();
           return haystack.contains(_query.toLowerCase());
         }).toList();
     if (_view == EducationCatalogView.recent) {
@@ -229,7 +262,11 @@ class _EducationTile extends StatelessWidget {
     final content = item.contentFor(language);
     final available = item.isAvailableIn(language);
     final title =
-        available ? content.title : '${item.category}·${language.label}';
+        item.isVideo
+            ? item.videoTitle
+            : available
+            ? content.title
+            : '${item.category}·${language.label}';
     return Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
@@ -247,7 +284,11 @@ class _EducationTile extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  item.favorite ? Icons.star : Icons.menu_book_outlined,
+                  item.favorite
+                      ? Icons.star
+                      : item.isVideo
+                      ? Icons.play_circle_outline
+                      : Icons.menu_book_outlined,
                   color: Theme.of(context).colorScheme.onPrimaryContainer,
                 ),
               ),
@@ -267,8 +308,10 @@ class _EducationTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      available
-                          ? '${item.category} · 约 ${item.estimatedManualMinutes} 分钟'
+                      item.isVideo
+                          ? '视频宣教 · ${item.category} · 本地播放'
+                          : available
+                          ? '文字宣教 · ${item.category} · 约 ${item.estimatedManualMinutes} 分钟'
                           : '该语言暂未提供',
                       style: TextStyle(
                         color:
@@ -283,7 +326,13 @@ class _EducationTile extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Icon(available ? Icons.chevron_right : Icons.lock_outline),
+              Icon(
+                available
+                    ? item.isVideo
+                        ? Icons.play_arrow_rounded
+                        : Icons.chevron_right
+                    : Icons.lock_outline,
+              ),
             ],
           ),
         ),

@@ -110,6 +110,15 @@ class EducationSessionController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> recordVideoSelected(EducationItem item) =>
+      _saveStandaloneVideoEvent(EducationEventType.itemSelected, item);
+
+  Future<void> recordVideoPlaybackStarted(EducationItem item) =>
+      _saveStandaloneVideoEvent(EducationEventType.playbackStarted, item);
+
+  Future<void> recordVideoPlaybackCompleted(EducationItem item) =>
+      _saveStandaloneVideoEvent(EducationEventType.playbackCompleted, item);
+
   void updateVisibleCaption(String caption) {
     final item = _requireItem();
     _requireStage(const {EducationSessionStage.playing}, '只有播报期间可以更新字幕');
@@ -231,6 +240,30 @@ class EducationSessionController extends ChangeNotifier {
   }) async {
     final event = _buildEvent(type, attempt: attempt, value: value);
     if (event != null) await events.save(event);
+  }
+
+  Future<void> _saveStandaloneVideoEvent(
+    EducationEventType type,
+    EducationItem item,
+  ) async {
+    _requireSession();
+    if (!item.isVideo || !item.isAvailableIn(_state.language)) {
+      throw StateError('所选视频宣教不可用');
+    }
+    await events.save(
+      EducationSessionEvent(
+        id: _idGenerator(),
+        sessionId: _state.sessionId!,
+        departmentId: departmentId,
+        itemId: item.id,
+        itemVersion: item.version,
+        language: _state.language,
+        type: type,
+        attempt: null,
+        value: null,
+        occurredAt: _clock().toUtc(),
+      ),
+    );
   }
 
   EducationSessionEvent? _buildEvent(

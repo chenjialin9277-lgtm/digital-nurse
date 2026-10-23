@@ -8,7 +8,9 @@ List<LocalQuickAnswer> buildEducationRollbackSnapshot(
   return items
       .where(
         (item) =>
-            item.enabled && item.isAvailableIn(OfflineSpeechLanguage.mandarin),
+            item.isText &&
+            item.enabled &&
+            item.isAvailableIn(OfflineSpeechLanguage.mandarin),
       )
       .map((item) {
         final mandarin = item.contentFor(OfflineSpeechLanguage.mandarin);

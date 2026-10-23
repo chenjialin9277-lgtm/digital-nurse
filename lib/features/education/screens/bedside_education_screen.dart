@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../models/offline_speech_language.dart';
 import '../../../services/local_speech_service.dart';
+import '../../../services/education_video_service.dart';
 import '../../../theme/nurse_theme.dart';
 import '../controllers/education_session_controller.dart';
 import '../models/education_item.dart';
@@ -19,6 +21,7 @@ class BedsideEducationScreen extends StatefulWidget {
     this.onOfflinePlaybackStarting,
     this.onOfflinePlaybackEnded,
     this.onLanguageChanged,
+    this.videoService = const EducationVideoService(),
   });
 
   final List<EducationItem> items;
@@ -28,6 +31,7 @@ class BedsideEducationScreen extends StatefulWidget {
   final Future<void> Function()? onOfflinePlaybackStarting;
   final Future<void> Function()? onOfflinePlaybackEnded;
   final ValueChanged<OfflineSpeechLanguage>? onLanguageChanged;
+  final EducationVideoService videoService;
 
   @override
   State<BedsideEducationScreen> createState() => _BedsideEducationScreenState();
@@ -151,11 +155,26 @@ class _BedsideEducationScreenState extends State<BedsideEducationScreen> {
     if (!item.isAvailableIn(_language)) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text('${item.category}：该语言暂未提供')));
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              item.isVideo
+                  ? '${item.category}：视频文件不可用，请联系管理员'
+                  : '${item.category}：该语言暂未提供',
+            ),
+          ),
+        );
       return;
     }
     setState(() => _selectingItem = true);
     try {
+      _recentItemIds
+        ..remove(item.id)
+        ..insert(0, item.id);
+      if (item.isVideo) {
+        await _playVideoItem(item);
+        return;
+      }
       if (widget.session.state.stage == EducationSessionStage.idle) {
         await widget.session.startSession(_language);
       }
@@ -164,9 +183,6 @@ class _BedsideEducationScreenState extends State<BedsideEducationScreen> {
         await widget.session.clearTransientState();
         return;
       }
-      _recentItemIds
-        ..remove(item.id)
-        ..insert(0, item.id);
       await Navigator.of(context).push<void>(
         MaterialPageRoute(
           builder:
@@ -189,6 +205,33 @@ class _BedsideEducationScreenState extends State<BedsideEducationScreen> {
       );
     } finally {
       if (mounted) setState(() => _selectingItem = false);
+    }
+  }
+
+  Future<void> _playVideoItem(EducationItem item) async {
+    var suspended = false;
+    try {
+      if (widget.session.state.stage == EducationSessionStage.idle) {
+        await widget.session.startSession(_language);
+      }
+      await widget.session.recordVideoSelected(item);
+      await widget.session.recordVideoPlaybackStarted(item);
+      await widget.onOfflinePlaybackStarting?.call();
+      suspended = true;
+      final completed = await widget.videoService.playVideo(
+        path: item.videoPath,
+        title: item.videoTitle,
+      );
+      if (completed) {
+        await widget.session.recordVideoPlaybackCompleted(item);
+      }
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.message ?? '视频播放失败')));
+    } finally {
+      if (suspended) await widget.onOfflinePlaybackEnded?.call();
     }
   }
 }
