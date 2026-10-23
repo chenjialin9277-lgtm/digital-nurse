@@ -32,8 +32,8 @@ Dart 全部 87 个文件统一格式；保留原患者端行为、临床宣教�
 ## 验证记录
 
 - 初始基线：134 项 Flutter 测试通过，Dart 静态分析无问题。
-- 整理后的 Flutter 回归：137 项测试全部通过（原 134 项 + 3 项缺陷回归）；`dart analyze --fatal-infos` 无问题；87 个 Dart 文件格式检查通过。
-- Android Debug APK：无签名文件的干净克隆构建成功（82.2 秒）；XLSX 两项 JVM 测试 0 失败、0 错误、0 跳过。项目范围的 `:app:testDebugUnitTest` 最终运行结果随后记录。
+- 整理后的 Flutter 回归：137 项测试全部通过（原 134 项 + 3 项缺陷回归）；`dart analyze --fatal-infos` 无问题；87 个 Dart 文件格式检查通过；独立干净克隆再次执行完整 `scripts/check.sh` 全部通过。
+- Android Debug APK：无签名文件的干净克隆构建成功（82.2 秒）；XLSX 两项 JVM 测试 0 失败、0 错误、0 跳过。项目范围的 `:app:testDebugUnitTest` 最终执行成功（BUILD SUCCESSFUL）；干净副本未包含 key.properties 或正式 keystore。
 - 资源与提交安全检查：405 个资源文件的 SHA-256/大小通过；4 个 LFS 对象 fsck 通过；18 个 JS/MJS 文件语法检查通过；Git diff 空白检查通过。
 - 实机：`adb devices -l` 未发现连接设备，未声明完成真实平板验收。
 - 可选 macOS 命令行语音验证：本地 Dart VM 进程被系统终止，未生成 WAV，因此不计为通过；当前发布目标仍是 Android。
