@@ -33,7 +33,7 @@ Dart 全部 87 个文件统一格式；保留原患者端行为、临床宣教�
 
 - 初始基线：134 项 Flutter 测试通过，Dart 静态分析无问题。
 - 整理后的 Flutter 回归：137 项测试全部通过（原 134 项 + 3 项缺陷回归）；`dart analyze --fatal-infos` 无问题；87 个 Dart 文件格式检查通过。
-- Android 原生单元测试与 Debug APK：待最终记录。
+- Android Debug APK：无签名文件的干净克隆构建成功（82.2 秒）；XLSX 两项 JVM 测试 0 失败、0 错误、0 跳过。项目范围的 `:app:testDebugUnitTest` 最终运行结果随后记录。
 - 资源与提交安全检查：405 个资源文件的 SHA-256/大小通过；4 个 LFS 对象 fsck 通过；18 个 JS/MJS 文件语法检查通过；Git diff 空白检查通过。
 - 实机：`adb devices -l` 未发现连接设备，未声明完成真实平板验收。
 - 可选 macOS 命令行语音验证：本地 Dart VM 进程被系统终止，未生成 WAV，因此不计为通过；当前发布目标仍是 Android。
@@ -41,6 +41,8 @@ Dart 全部 87 个文件统一格式；保留原患者端行为、临床宣教�
 验证结果只说明已执行检查的实际范围，不代表不存在其他缺陷。GitHub 上传、APK 构建、正式分发和实机验收分别记录。
 
 首次原目录 Debug 构建在 Opus 原生编译阶段失败，错误指向包含空格的实际目录；随后改用不含空格的干净副本验证。开发文档已写明路径要求。构建链同时提示 Gradle/AGP/Kotlin 的未来支持版本，当前声明版本保留，后续升级应作为独立任务回归。
+
+顶层 `testDebugUnitTest` 还尝试执行外部 path_provider 插件自己的测试，因其测试 Manifest 的 minSdk 19 与依赖要求 21 冲突而失败；本应用 minSdk 为 24，APK 构建成功。当前验收命令已明确为本仓库应用模块的 `:app:testDebugUnitTest`，不修改外部插件测试配置。
 
 ## 接手后需要继续处理的事项
 

@@ -26,7 +26,7 @@ flutter pub get
 bash scripts/check.sh
 flutter run -d <Android设备ID>
 flutter build apk --debug
-(cd android && ./gradlew testDebugUnitTest)
+(cd android && ./gradlew :app:testDebugUnitTest)
 ```
 
 `check.sh` 依次执行依赖获取、87 个 Dart 文件格式检查、Dart 静态分析、全量 Flutter 测试及资源/仓库校验。若 Dart 文件数量后续变化，按实际文件数计算。图像基准由 macOS 环境生成，CI 使用 macOS；出现图像差异应检查渲染环境及真实布局变化，不直接覆盖基准图。

@@ -48,7 +48,7 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build apk --debug
-      - run: cd android && ./gradlew testDebugUnitTest
+      - run: cd android && ./gradlew :app:testDebugUnitTest
       - uses: actions/upload-artifact@v4
         with:
           name: digital-nurse-debug

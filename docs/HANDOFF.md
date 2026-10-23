@@ -27,7 +27,7 @@ flutter --version   # 3.44.6，配套 Dart 3.12.2
 flutter doctor -v
 bash scripts/check.sh
 flutter build apk --debug
-(cd android && ./gradlew testDebugUnitTest)
+(cd android && ./gradlew :app:testDebugUnitTest)
 ```
 
 按 README 安装 JDK 17 / Android SDK 36 / NDK 27.0.12077973。Debug 构建不需要正式签名；所有设备身份和小智 Token 由应用首次激活流程在本机建立。正式 APK 签名和已有平板上的配置不随 GitHub 仓库传递。
