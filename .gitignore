@@ -115,6 +115,9 @@ coverage/
 **/.vitepress/cache/
 **/.vitepress/dist/
 **/build/
+# three.js ships its actual JavaScript source bundles in this directory.
+!assets/avatar3d/three/build/
+!assets/avatar3d/three/build/**
 android/.kotlin/
 test/failures/
 assets/tts/downloads/

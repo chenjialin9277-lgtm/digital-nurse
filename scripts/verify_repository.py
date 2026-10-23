@@ -33,6 +33,8 @@ def main():
     tracked = subprocess.check_output(
         ["git", "ls-files", "-z"], cwd=ROOT
     ).decode().split("\0")
+    for name in sorted(declared - set(tracked)):
+        failures.append(f"Asset exists locally but is not tracked: {name}")
     secret_patterns = {
         "private key": rb"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----",
         "GitHub token": rb"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})\b",
