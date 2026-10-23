@@ -6,7 +6,7 @@
 
 实际工程为 `work/xiaozhi-android-client`。初始本地 main 为 `79613242c585a48ddeda3387a6954ecc6aff1da0`，含 23 项数字护士本地提交，以及大量尚未提交的 v0.17 开发文件；应用版本为 `0.17.0+23`。本次在 `refactor/developer-handoff-20261023` 整理，原有开发内容均纳入交接。
 
-原远程为 `TOM88812/xiaozhi-android-client`；已保留为 upstream。刷新后其 main 为 `30a0c80446a3a88772945244739c0e69b79c647c`，与本地产品分支分叉（本地独有 23 项、上游独有 7 项），没有把上游通用客户端改动自动合入数字护士。新的 origin 是已验证归属的私有仓库 `chenjialin9277-lgtm/digital-nurse`。
+原远程为 `TOM88812/xiaozhi-android-client`；已保留为 upstream。刷新后其 main 为 `30a0c80446a3a88772945244739c0e69b79c647c`，与本地产品分支分叉（本地独有 23 项、上游独有 7 项），没有把上游通用客户端改动自动合入数字护士。新的 origin 是已验证归属的私有仓库 `chenjialin9277-lgtm/digital-nurse`。原副本为浅克隆；首次推送暴露缺失父提交后，已从 upstream 补齐完整历史，Git fsck 通过；补齐后扫描 1,182 个历史文本/小型 blob 未检出所检查的秘密格式。
 
 审查覆盖：当前全部 Dart 源码/测试/工具、Android Kotlin/Java/Gradle/Manifest、本地 PCM 插件、平台骨架、GitHub 工作流、依赖锁文件、开发文档及全部资源清单。对运行代码结合阅读、静态分析和测试检查；保留的第三方 JS/模型及上游历史材料核对来源、用途和文件完整性，不作为本次重新开发或跨平台验收的对象。逐项开发文件见 `SOURCE_INVENTORY.md`。
 
