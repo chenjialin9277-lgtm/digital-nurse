@@ -1,6 +1,16 @@
 import '../../../models/offline_speech_language.dart';
 import 'education_language_content.dart';
 
+enum EducationItemKind {
+  text,
+  video;
+
+  static EducationItemKind fromStored(Object? value) => values.firstWhere(
+    (kind) => kind.name == value,
+    orElse: () => EducationItemKind.text,
+  );
+}
+
 class EducationItem {
   EducationItem({
     required this.id,
@@ -13,6 +23,9 @@ class EducationItem {
     required this.version,
     required this.createdAt,
     required this.updatedAt,
+    this.kind = EducationItemKind.text,
+    this.videoTitle = '',
+    this.videoPath = '',
   }) : contents = Map.unmodifiable(contents);
 
   final String id;
@@ -25,6 +38,17 @@ class EducationItem {
   final int version;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final EducationItemKind kind;
+  final String videoTitle;
+  final String videoPath;
+
+  bool get isVideo => kind == EducationItemKind.video;
+  bool get isText => kind == EducationItemKind.text;
+
+  String titleFor(OfflineSpeechLanguage language) {
+    if (isVideo) return videoTitle.trim();
+    return contentFor(language).title.trim();
+  }
 
   EducationLanguageContent contentFor(OfflineSpeechLanguage language) =>
       contents[language] ??
@@ -41,6 +65,11 @@ class EducationItem {
       );
 
   bool isAvailableIn(OfflineSpeechLanguage language) {
+    if (isVideo) {
+      return enabled &&
+          videoTitle.trim().isNotEmpty &&
+          videoPath.trim().isNotEmpty;
+    }
     final content = contents[language];
     return enabled &&
         content != null &&
@@ -59,6 +88,9 @@ class EducationItem {
     int? version,
     DateTime? createdAt,
     DateTime? updatedAt,
+    EducationItemKind? kind,
+    String? videoTitle,
+    String? videoPath,
   }) => EducationItem(
     id: id ?? this.id,
     category: category ?? this.category,
@@ -71,6 +103,9 @@ class EducationItem {
     version: version ?? this.version,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
+    kind: kind ?? this.kind,
+    videoTitle: videoTitle ?? this.videoTitle,
+    videoPath: videoPath ?? this.videoPath,
   );
 
   factory EducationItem.fromJson(Map<String, dynamic> json) {
@@ -100,6 +135,9 @@ class EducationItem {
       updatedAt:
           DateTime.tryParse(json['updatedAt'] as String? ?? '')?.toUtc() ??
           DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+      kind: EducationItemKind.fromStored(json['kind']),
+      videoTitle: json['videoTitle'] as String? ?? '',
+      videoPath: json['videoPath'] as String? ?? '',
     );
   }
 
@@ -117,6 +155,9 @@ class EducationItem {
     'version': version,
     'createdAt': createdAt.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
+    'kind': kind.name,
+    'videoTitle': videoTitle,
+    'videoPath': videoPath,
   };
 
   @override
@@ -132,13 +173,16 @@ class EducationItem {
           other.enabled == enabled &&
           other.version == version &&
           other.createdAt == createdAt &&
-          other.updatedAt == updatedAt;
+          other.updatedAt == updatedAt &&
+          other.kind == kind &&
+          other.videoTitle == videoTitle &&
+          other.videoPath == videoPath;
 
   @override
   int get hashCode => Object.hash(
     id,
     category,
-    Object.hashAll(
+    Object.hashAllUnordered(
       contents.entries.map((entry) => Object.hash(entry.key, entry.value)),
     ),
     estimatedManualMinutes,
@@ -148,6 +192,9 @@ class EducationItem {
     version,
     createdAt,
     updatedAt,
+    kind,
+    videoTitle,
+    videoPath,
   );
 }
 

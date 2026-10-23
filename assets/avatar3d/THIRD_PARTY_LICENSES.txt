@@ -1,0 +1,22 @@
+Talking Head (3D)
+Copyright (c) 2023-2024 Mika Suominen
+License: MIT
+Source: https://github.com/met4citizen/TalkingHead
+
+HeadAudio
+Copyright (c) 2025 Mika Suominen
+License: MIT
+Source: https://github.com/met4citizen/HeadAudio
+
+three.js
+Copyright (c) 2010-2026 three.js authors
+License: MIT
+Source: https://github.com/mrdoob/three.js
+
+MPFB example avatar (nurse_base_cc0.glb)
+License: Creative Commons Zero (CC0)
+Source: https://github.com/met4citizen/TalkingHead/tree/main/avatars
+
+The avatar has been locally restyled in this application. No cloud avatar,
+cloud rendering, paid mouth-animation service, or non-commercial avatar asset
+is required by the 3D test mode.

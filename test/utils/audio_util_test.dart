@@ -1,6 +1,7 @@
 import 'package:digital_nurse/utils/audio_util.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:record/record.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -25,5 +26,15 @@ void main() {
       AudioUtil.initPlayer(),
       throwsA(isA<PlatformException>()),
     );
+  });
+
+  test('push-to-talk uses the tablet voice-recognition microphone', () {
+    expect(
+      AudioUtil.recordConfig.androidConfig.audioSource,
+      AndroidAudioSource.voiceRecognition,
+    );
+    expect(AudioUtil.recordConfig.androidConfig.manageBluetooth, isFalse);
+    expect(AudioUtil.recordConfig.sampleRate, AudioUtil.sampleRate);
+    expect(AudioUtil.recordConfig.numChannels, AudioUtil.channels);
   });
 }

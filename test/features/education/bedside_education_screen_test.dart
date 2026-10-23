@@ -9,6 +9,7 @@ import 'package:digital_nurse/features/education/screens/education_playback_scre
 import 'package:digital_nurse/features/education/widgets/daily_language_selector.dart';
 import 'package:digital_nurse/models/offline_speech_language.dart';
 import 'package:digital_nurse/theme/nurse_theme.dart';
+import 'package:digital_nurse/services/education_video_service.dart';
 import 'package:digital_nurse/widgets/nurse_avatar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -153,6 +154,49 @@ void main() {
     expect(find.text('开始宣教'), findsOneWidget);
     expect(harness.session.state.selectedItem?.id, reviewedItem.id);
     expect(harness.session.state.stage, EducationSessionStage.ready);
+  });
+
+  testWidgets('视频宣教与文字宣教分开展示并直接本地播放', (tester) async {
+    final events = FakeEducationEventRepository();
+    final session = EducationSessionController(
+      events: events,
+      departmentId: 'emergency_ward',
+    );
+    await session.startSession(OfflineSpeechLanguage.mandarin);
+    final video = _videoItem();
+    final videos = _FakeEducationVideoService();
+    var suspended = 0;
+    var resumed = 0;
+    await tester.pumpWidget(
+      _testApp(
+        BedsideEducationScreen(
+          items: [reviewedItem, video],
+          session: session,
+          departmentName: '急诊病房',
+          videoService: videos,
+          onOfflinePlaybackStarting: () async => suspended++,
+          onOfflinePlaybackEnded: () async => resumed++,
+        ),
+      ),
+    );
+
+    expect(find.text('文字宣教'), findsOneWidget);
+    expect(find.text('视频宣教'), findsWidgets);
+    await tester.tap(find.text('出院换药示范'));
+    await tester.pump();
+
+    expect(videos.playedPath, '/app/education_videos/discharge.mp4');
+    expect(suspended, 1);
+    expect(resumed, 1);
+    expect(find.byType(EducationPlaybackScreen), findsNothing);
+    expect(
+      events.saved.map((event) => event.type),
+      containsAllInOrder([
+        EducationEventType.itemSelected,
+        EducationEventType.playbackStarted,
+        EducationEventType.playbackCompleted,
+      ]),
+    );
   });
 
   testWidgets('工作台向播放页透传数字护士和音频边界', (tester) async {
@@ -301,4 +345,33 @@ class _BlockingSelectionEventRepository implements EducationEventRepository {
     DateTime start,
     DateTime end,
   ) async => const [];
+}
+
+EducationItem _videoItem() {
+  final now = DateTime.utc(2026, 8, 18);
+  return EducationItem(
+    id: 'discharge-video',
+    category: '出院宣教',
+    contents: const {},
+    estimatedManualMinutes: 3,
+    sortOrder: 2,
+    favorite: false,
+    enabled: true,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+    kind: EducationItemKind.video,
+    videoTitle: '出院换药示范',
+    videoPath: '/app/education_videos/discharge.mp4',
+  );
+}
+
+class _FakeEducationVideoService extends EducationVideoService {
+  String? playedPath;
+
+  @override
+  Future<bool> playVideo({required String path, required String title}) async {
+    playedPath = path;
+    return true;
+  }
 }

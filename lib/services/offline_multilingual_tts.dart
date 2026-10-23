@@ -11,6 +11,8 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa_onnx;
 
 import '../models/offline_speech_language.dart';
 import 'local_speech_event.dart';
+import 'offline_speech_cache.dart';
+import 'offline_speech_segmenter.dart';
 
 /// Bundled, network-independent speech synthesis for fixed education answers.
 ///
@@ -41,6 +43,7 @@ class OfflineMultilingualTts {
   final _playbackDurations = StreamController<Duration>.broadcast(sync: true);
   final Map<int, Completer<Map<Object?, Object?>>> _requests = {};
   final Map<OfflineSpeechLanguage, Future<Directory>> _modelCopies = {};
+  Future<OfflineSpeechCache>? _cachePreparing;
   Future<void>? _workerPreparing;
   SendPort? _workerPort;
   FlutterPcmPlayer? _player;
@@ -152,66 +155,211 @@ class OfflineMultilingualTts {
     required OfflineSpeechLanguage language,
   }) async {
     await stop();
-    if (text.trim().isEmpty) {
+    final normalizedText = text.trim();
+    if (normalizedText.isEmpty) {
       _events.add(LocalSpeechEvent.error);
       return;
     }
 
     final ticket = ++_playbackTicket;
     try {
+      final cache = await _speechCache();
+      final cached = await cache.read(language: language, text: normalizedText);
+      if (ticket != _playbackTicket) return;
+      if (cached != null) {
+        await _playCachedAudio(cached, ticket);
+        return;
+      }
+
       await prepare(language);
       if (ticket != _playbackTicket) return;
       final directory = await _modelCopies[language]!;
-      final result = await _sendRequest(<String, Object?>{
-        'command': 'generate',
-        'language': language.name,
-        'modelDirectory': directory.path,
-        'text': text.trim(),
-      }).timeout(const Duration(minutes: 3));
+      final segments = splitSpeechForFastStart(normalizedText, language);
+      final firstGenerationWatch = Stopwatch()..start();
+      final first = await _generateSpeech(
+        text: segments.first,
+        language: language,
+        directory: directory,
+      );
+      firstGenerationWatch.stop();
       if (ticket != _playbackTicket) return;
 
-      final transferable = result['pcm'];
-      final sampleRate = result['sampleRate'];
-      final sampleCount = result['sampleCount'];
-      if (transferable is! TransferableTypedData ||
-          sampleRate is! int ||
-          sampleCount is! int ||
-          sampleRate <= 0 ||
-          sampleCount <= 0) {
-        throw StateError('Offline speech generation returned no audio');
+      // A single short synthesized segment is not enough to hide the time
+      // needed to generate the next segment on mid-range tablets, especially
+      // with the Cantonese model. Build an adaptive safety buffer before
+      // starting AudioTrack, then continue synthesizing ahead of playback.
+      var completeAudio = first;
+      var nextSegmentIndex = 1;
+      final prebufferTarget = _offlinePrebufferTarget(
+        language,
+        firstGenerationWatch.elapsed,
+      );
+      while (nextSegmentIndex < segments.length &&
+          completeAudio.duration < prebufferTarget) {
+        final bufferedSegment = await _generateSpeech(
+          text: segments[nextSegmentIndex],
+          language: language,
+          directory: directory,
+        );
+        if (ticket != _playbackTicket) return;
+        completeAudio = OfflineSpeechAudio.combine(
+          completeAudio,
+          bufferedSegment,
+        );
+        nextSegmentIndex++;
       }
 
-      final pcm = transferable.materialize().asUint8List();
       final player = FlutterPcmPlayer();
       _player = player;
       await player.initialize(
         nChannels: 1,
-        sampleRate: sampleRate,
+        sampleRate: first.sampleRate,
         pcmType: PCMType.pcm16,
       );
       await player.play();
       if (ticket != _playbackTicket) return;
+      final playbackWatch = Stopwatch()..start();
+      await _feedAudio(player, completeAudio.pcm, ticket);
+      if (ticket != _playbackTicket) return;
 
-      const chunkBytes = 64 * 1024;
-      for (var offset = 0; offset < pcm.length; offset += chunkBytes) {
-        if (ticket != _playbackTicket) return;
-        final end = math.min(offset + chunkBytes, pcm.length);
-        await player.feed(Uint8List.sublistView(pcm, offset, end));
-      }
-      final duration = Duration(
-        milliseconds: (sampleCount * 1000 / sampleRate).ceil() + 300,
+      final estimatedDuration = Duration(
+        milliseconds:
+            (first.duration.inMilliseconds *
+                    normalizedText.runes.length /
+                    math.max(1, segments.first.runes.length))
+                .ceil(),
       );
-      _playbackDurations.add(duration);
+      _playbackDurations.add(estimatedDuration);
       _events.add(LocalSpeechEvent.started);
-      _completionTimer = Timer(duration, () {
-        unawaited(_completePlayback(ticket));
-      });
+
+      OfflineSpeechAudio? lastSegment;
+      for (final segment in segments.skip(nextSegmentIndex)) {
+        lastSegment = await _generateSpeech(
+          text: segment,
+          language: language,
+          directory: directory,
+        );
+        if (ticket != _playbackTicket) return;
+        await _feedAudio(player, lastSegment.pcm, ticket);
+        if (ticket != _playbackTicket) return;
+        completeAudio = OfflineSpeechAudio.combine(completeAudio, lastSegment);
+      }
+
+      unawaited(
+        cache
+            .write(
+              language: language,
+              text: normalizedText,
+              audio: completeAudio,
+            )
+            .catchError((_) {}),
+      );
+      final elapsed = playbackWatch.elapsed;
+      playbackWatch.stop();
+      final remainingFromTotal = completeAudio.duration - elapsed;
+      final safeRemaining = _maxDuration(
+        remainingFromTotal,
+        lastSegment?.duration ?? completeAudio.duration,
+      );
+      _completionTimer = Timer(
+        safeRemaining + const Duration(milliseconds: 300),
+        () => unawaited(_completePlayback(ticket)),
+      );
     } catch (_) {
       if (ticket == _playbackTicket) {
         await _releasePlayer();
         _events.add(LocalSpeechEvent.error);
       }
     }
+  }
+
+  Future<OfflineSpeechCache> _speechCache() {
+    return _cachePreparing ??= () async {
+      final support = await getApplicationSupportDirectory();
+      return OfflineSpeechCache(
+        Directory(
+          '${support.path}${Platform.pathSeparator}offline_tts'
+          '${Platform.pathSeparator}audio_cache_v1',
+        ),
+        formatVersion: 'models_v3_speed_1_silence_022_pcm16',
+      );
+    }();
+  }
+
+  Future<OfflineSpeechAudio> _generateSpeech({
+    required String text,
+    required OfflineSpeechLanguage language,
+    required Directory directory,
+  }) async {
+    final result = await _sendRequest(<String, Object?>{
+      'command': 'generate',
+      'language': language.name,
+      'modelDirectory': directory.path,
+      'text': text,
+    }).timeout(const Duration(minutes: 3));
+    final transferable = result['pcm'];
+    final sampleRate = result['sampleRate'];
+    final sampleCount = result['sampleCount'];
+    if (transferable is! TransferableTypedData ||
+        sampleRate is! int ||
+        sampleCount is! int ||
+        sampleRate <= 0 ||
+        sampleCount <= 0) {
+      throw StateError('Offline speech generation returned no audio');
+    }
+    return OfflineSpeechAudio(
+      sampleRate: sampleRate,
+      sampleCount: sampleCount,
+      pcm: transferable.materialize().asUint8List(),
+    );
+  }
+
+  Future<void> _playCachedAudio(OfflineSpeechAudio audio, int ticket) async {
+    final player = FlutterPcmPlayer();
+    _player = player;
+    await player.initialize(
+      nChannels: 1,
+      sampleRate: audio.sampleRate,
+      pcmType: PCMType.pcm16,
+    );
+    await player.play();
+    if (ticket != _playbackTicket) return;
+    await _feedAudio(player, audio.pcm, ticket);
+    if (ticket != _playbackTicket) return;
+    _playbackDurations.add(audio.duration);
+    _events.add(LocalSpeechEvent.started);
+    _completionTimer = Timer(
+      audio.duration + const Duration(milliseconds: 300),
+      () => unawaited(_completePlayback(ticket)),
+    );
+  }
+
+  Future<void> _feedAudio(
+    FlutterPcmPlayer player,
+    Uint8List pcm,
+    int ticket,
+  ) async {
+    const chunkBytes = 64 * 1024;
+    for (var offset = 0; offset < pcm.length; offset += chunkBytes) {
+      if (ticket != _playbackTicket) return;
+      final end = math.min(offset + chunkBytes, pcm.length);
+      await player.feed(Uint8List.sublistView(pcm, offset, end));
+    }
+  }
+
+  Duration _maxDuration(Duration left, Duration right) =>
+      left > right ? left : right;
+
+  Duration _offlinePrebufferTarget(
+    OfflineSpeechLanguage language,
+    Duration firstGenerationTime,
+  ) {
+    final minimumMilliseconds =
+        language == OfflineSpeechLanguage.cantonese ? 9000 : 6000;
+    final measuredMilliseconds = firstGenerationTime.inMilliseconds * 3 + 1500;
+    return Duration(
+      milliseconds: measuredMilliseconds.clamp(minimumMilliseconds, 18000),
+    );
   }
 
   Future<Map<Object?, Object?>> _sendRequest(

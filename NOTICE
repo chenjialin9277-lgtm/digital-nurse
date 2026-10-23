@@ -1,0 +1,23 @@
+Digital Nurse Android Client
+Copyright 2026 Digital Nurse Project
+
+This product includes software developed from the xiaozhi-android-client
+project by TOM88812 and contributors, licensed under the Apache License 2.0:
+https://github.com/TOM88812/xiaozhi-android-client
+
+This product includes a modified flutter_pcm_player component originally by
+jax/rocchen. Its license is reproduced in packages/flutter_pcm_player/LICENSE.
+
+The Xiaozhi ESP32 firmware and protocol documentation are maintained by the
+78/xiaozhi-esp32 project and licensed under the MIT License:
+https://github.com/78/xiaozhi-esp32
+
+This product includes the sherpa-onnx offline speech synthesis runtime by the
+k2-fsa project, licensed under the Apache License 2.0:
+https://github.com/k2-fsa/sherpa-onnx
+
+The bundled XiaoYa Mandarin voice model is distributed for non-commercial use.
+Its model card is reproduced at
+assets/tts/vits-piper-zh_CN-xiao_ya-medium/MODEL_CARD. The current build is for
+internal evaluation and patient-education testing; obtain suitable model rights
+or replace the voice model before commercial distribution.

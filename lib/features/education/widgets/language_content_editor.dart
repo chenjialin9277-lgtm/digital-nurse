@@ -46,6 +46,20 @@ class LanguageContentEditorState extends State<LanguageContentEditor> {
 
   bool validateForPublish() => formKey.currentState?.validate() ?? false;
 
+  bool get hasAnyText =>
+      _title.text.trim().isNotEmpty ||
+      _body.text.trim().isNotEmpty ||
+      _summary.text.trim().isNotEmpty ||
+      (questionKey.currentState?.question.isNotEmpty ?? false);
+
+  void replaceWith(EducationLanguageContent content) {
+    _title.text = content.title;
+    _body.text = content.body;
+    _summary.text = content.summary;
+    questionKey.currentState?.replaceWith(content);
+    if (!_dirty) setState(() => _dirty = true);
+  }
+
   EducationLanguageContent content({
     required bool published,
     required bool needsReview,

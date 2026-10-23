@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <meta name="color-scheme" content="light" />
+    <title>Local 3D Digital Nurse</title>
+    <style>
+      html, body, #avatar { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      body { background: transparent; font-family: system-ui, sans-serif; }
+      #avatar {
+        background:
+          radial-gradient(circle at 50% 32%, rgba(255,255,255,.98) 0 24%, rgba(227,246,246,.84) 58%, rgba(204,235,237,.42) 100%),
+          linear-gradient(160deg, #eefafa, #dff1f4);
+      }
+      #veil {
+        position: fixed; inset: 0; display: grid; place-items: center;
+        background: linear-gradient(160deg, #f5fcfc, #e4f4f5);
+        color: #1a6168; font-size: 15px; letter-spacing: .05em;
+        transition: opacity .35s ease;
+      }
+      #veil.hidden { opacity: 0; pointer-events: none; }
+      .pulse {
+        width: 42px; height: 42px; margin: 0 auto 14px; border-radius: 50%;
+        border: 3px solid rgba(19,135,143,.16); border-top-color: #13878f;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./three/build/three.module.js",
+          "three/addons/": "./three/examples/jsm/",
+          "talkinghead": "./modules/talkinghead.mjs"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="avatar"></div>
+    <div id="veil"><div><div class="pulse"></div><div id="status">正在加载本地3D护士…</div></div></div>
+    <script type="module" src="./nurse_avatar.js?v=16"></script>
+  </body>
+</html>

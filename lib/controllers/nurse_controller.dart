@@ -10,6 +10,8 @@ import '../features/education/data/legacy_education_migrator.dart';
 import '../features/education/data/native_education_event_repository.dart';
 import '../features/education/data/native_education_repository.dart';
 import '../features/education/models/education_item.dart';
+import '../features/education/models/education_language_content.dart';
+import '../features/education/services/education_translation_service.dart';
 import '../models/nurse_app_config.dart';
 import '../models/offline_speech_language.dart';
 import '../models/app_usage_record.dart';
@@ -74,6 +76,8 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   bool _hasReadySession = false;
   bool _networkAvailable = true;
   bool _playingLocalAnswer = false;
+  Future<void>? _pushToTalkStart;
+  bool _pushToTalkSessionActive = false;
   NurseUiState _stateBeforeLocalAnswer = NurseUiState.idle;
   int _networkErrorCount = 0;
   String? _onlineAudioRestoreError;
@@ -86,7 +90,10 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
 
   NurseUiState state = NurseUiState.connecting;
   String userText = '';
-  String assistantText = '您好，我是广州中医药大学第三附属医院急诊病房数字护士。您可以向我询问入院、检查和出院注意事项。';
+  String assistantText = NurseAppConfig.defaultStartupSubtitle(
+    NurseAppConfig.defaultHospitalName,
+    NurseAppConfig.defaultWardName,
+  );
   String emotion = 'neutral';
   String? errorMessage;
   String? activationCode;
@@ -99,6 +106,18 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   List<EducationItem> get favoriteEducationItems =>
       List.unmodifiable(_activeEducationItems.where((item) => item.favorite));
   LocalSpeechService get localSpeechService => _localSpeech;
+
+  Future<EducationTranslationBundle> translateEducationFromMandarin(
+    EducationLanguageContent mandarin,
+  ) async {
+    final service = _service;
+    if (service == null || !service.isConnected) {
+      throw StateError('小智尚未连接，请确认网络和账号绑定后重试');
+    }
+    return EducationTranslationService(
+      requestText: service.requestSilentTextMessage,
+    ).translateFromMandarin(mandarin);
+  }
 
   Future<void> initializeLocalState() {
     final existing = _localStateInitialization;
@@ -126,6 +145,7 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
     }
     try {
       config = await _repository.load();
+      assistantText = config.startupSubtitle;
     } catch (error) {
       educationInitializationError = '本地配置读取失败：$error';
       state = NurseUiState.setupRequired;
@@ -373,6 +393,10 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
         previous.token != updated.token ||
         previous.protocolVersion != updated.protocolVersion;
     config = updated;
+    if (previous.startupSubtitle != updated.startupSubtitle) {
+      assistantText = updated.startupSubtitle;
+      userText = '';
+    }
     await _repository.save(updated);
     notifyListeners();
     if (!connectionChanged && _service != null) return;
@@ -406,8 +430,32 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
     await provisionOfficialPlatform();
   }
 
-  Future<void> startPushToTalk() async {
-    if (_service == null || !config.canConnect || isPressingToTalk) return;
+  Future<void> startPushToTalk() {
+    if (_service == null || !config.canConnect || isPressingToTalk) {
+      return Future<void>.value();
+    }
+    final interruptOnlineResponse = state == NurseUiState.speaking;
+    isPressingToTalk = true;
+    _pushToTalkSessionActive = false;
+    state = NurseUiState.listening;
+    userText = '';
+    errorMessage = null;
+    notifyListeners();
+
+    final start = _beginPushToTalk(
+      interruptOnlineResponse: interruptOnlineResponse,
+    );
+    _pushToTalkStart = start;
+    return start.whenComplete(() {
+      if (identical(_pushToTalkStart, start)) {
+        _pushToTalkStart = null;
+      }
+    });
+  }
+
+  Future<void> _beginPushToTalk({required bool interruptOnlineResponse}) async {
+    final service = _service;
+    if (service == null) return;
     if (_playingLocalAnswer) {
       try {
         await _localSpeech.stop();
@@ -416,17 +464,15 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
         await resumeOnlineAudioAfterEducation();
       }
     }
-    if (state == NurseUiState.speaking) {
-      await _service!.sendAbortMessage();
-      await _service!.stopPlayback();
+    if (!isPressingToTalk) return;
+    if (interruptOnlineResponse) {
+      await service.sendAbortMessage();
+      await service.stopPlayback();
     }
-    isPressingToTalk = true;
-    state = NurseUiState.listening;
-    userText = '';
-    errorMessage = null;
-    notifyListeners();
+    if (!isPressingToTalk) return;
     try {
-      await _service!.startListening(mode: 'manual');
+      await service.startListening(mode: 'manual');
+      _pushToTalkSessionActive = true;
     } catch (error) {
       isPressingToTalk = false;
       state = NurseUiState.error;
@@ -438,8 +484,14 @@ class NurseController extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> stopPushToTalk() async {
     if (!isPressingToTalk || _service == null) return;
     isPressingToTalk = false;
-    await _service!.stopListening();
-    state = NurseUiState.thinking;
+    await _pushToTalkStart;
+    if (_pushToTalkSessionActive) {
+      _pushToTalkSessionActive = false;
+      await _service!.stopListening();
+      state = NurseUiState.thinking;
+    } else if (state == NurseUiState.listening) {
+      state = NurseUiState.idle;
+    }
     notifyListeners();
   }
 

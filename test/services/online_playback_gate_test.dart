@@ -55,4 +55,22 @@ void main() {
 
     expect(starts, 2);
   });
+
+  test(
+    'each online utterance resets playback before accepting frames',
+    () async {
+      final calls = <String>[];
+      final gate = OnlinePlaybackGate(
+        playFrame: (frame) async => calls.add('frame:${frame.first}'),
+        stopPlayer: () async => calls.add('reset'),
+        startPlayer: () async {},
+      );
+
+      final reset = gate.beginUtterance();
+      final frame = gate.enqueueFrame(Uint8List.fromList([9]));
+      await Future.wait([reset, frame]);
+
+      expect(calls, ['reset', 'frame:9']);
+    },
+  );
 }

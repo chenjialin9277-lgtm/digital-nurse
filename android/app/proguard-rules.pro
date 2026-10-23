@@ -17,10 +17,15 @@
 -keep class androidx.** { *; }
 -keep class com.google.android.material.** { *; }
 
+# The app is distributed as a single sideloaded APK and does not use Play Store
+# deferred components. Flutter contains optional references to Play Core, so R8
+# can safely ignore those absent classes.
+-dontwarn com.google.android.play.core.**
+
 # 移除debug日志
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);
     public static int v(...);
     public static int d(...);
     public static int i(...);
-} 
+}

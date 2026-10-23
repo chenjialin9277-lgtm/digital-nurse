@@ -8,6 +8,7 @@ import '../features/education/data/education_rollback_snapshot.dart';
 import '../features/education/data/legacy_education_migrator.dart';
 import '../features/education/data/native_education_repository.dart';
 import '../features/education/models/education_item.dart';
+import '../features/education/services/education_translation_service.dart';
 import '../features/education/widgets/education_management_dialog.dart';
 import '../models/nurse_app_config.dart';
 import '../services/department_logo_service.dart';
@@ -23,6 +24,7 @@ class NurseConfigDialog extends StatefulWidget {
     this.logoService = const DepartmentLogoService(),
     this.avatarImageService = const NurseAvatarImageService(),
     this.educationRepository,
+    this.translateEducationFromMandarin,
   });
 
   final NurseAppConfig initial;
@@ -30,6 +32,7 @@ class NurseConfigDialog extends StatefulWidget {
   final DepartmentLogoService logoService;
   final NurseAvatarImageService avatarImageService;
   final EducationRepository? educationRepository;
+  final EducationTranslationCallback? translateEducationFromMandarin;
 
   @override
   State<NurseConfigDialog> createState() => _NurseConfigDialogState();
@@ -43,6 +46,7 @@ class _NurseConfigDialogState extends State<NurseConfigDialog> {
   late final TextEditingController _device;
   late final TextEditingController _token;
   late final TextEditingController _callText;
+  late final TextEditingController _startupSubtitle;
   late final TextEditingController _password;
   late final EducationRepository _educationRepository;
   late List<LocalQuickAnswer> _quickAnswersSnapshot;
@@ -64,6 +68,7 @@ class _NurseConfigDialogState extends State<NurseConfigDialog> {
     _device = TextEditingController(text: config.deviceId);
     _token = TextEditingController(text: config.token);
     _callText = TextEditingController(text: config.callNurseText);
+    _startupSubtitle = TextEditingController(text: config.startupSubtitle);
     _password = TextEditingController(text: config.settingsPassword);
     _educationRepository =
         widget.educationRepository ?? NativeEducationRepository();
@@ -83,6 +88,7 @@ class _NurseConfigDialogState extends State<NurseConfigDialog> {
     _device.dispose();
     _token.dispose();
     _callText.dispose();
+    _startupSubtitle.dispose();
     _password.dispose();
     super.dispose();
   }
@@ -124,6 +130,30 @@ class _NurseConfigDialogState extends State<NurseConfigDialog> {
                       const SizedBox(width: 12),
                       Expanded(child: _field(_ward, '科室/病区名称')),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    key: const Key('startup-subtitle-field'),
+                    controller: _startupSubtitle,
+                    minLines: 3,
+                    maxLines: 5,
+                    maxLength: 300,
+                    decoration: InputDecoration(
+                      labelText: '启动时实时字幕',
+                      helperText: '每次打开APP时首先显示；用户开始对话后由实时问答字幕接替。',
+                      alignLabelWithHint: true,
+                      border: const OutlineInputBorder(),
+                      suffixIcon: IconButton(
+                        tooltip: '按当前医院和科室生成默认欢迎语',
+                        onPressed: _resetStartupSubtitle,
+                        icon: const Icon(Icons.auto_fix_high_outlined),
+                      ),
+                    ),
+                    validator: (value) {
+                      final text = value?.trim() ?? '';
+                      if (text.isEmpty) return '请填写启动时实时字幕';
+                      return text.length > 300 ? '启动字幕不能超过300个字符' : null;
+                    },
                   ),
                   const SizedBox(height: 12),
                   _departmentLogoEditor(colors),
@@ -660,7 +690,10 @@ class _NurseConfigDialogState extends State<NurseConfigDialog> {
         context: context,
         barrierDismissible: false,
         builder:
-            (_) => EducationManagementDialog(repository: _educationRepository),
+            (_) => EducationManagementDialog(
+              repository: _educationRepository,
+              translateFromMandarin: widget.translateEducationFromMandarin,
+            ),
       );
       if (items == null || !mounted) return;
       final snapshot = buildEducationRollbackSnapshot(items);
@@ -704,10 +737,26 @@ class _NurseConfigDialogState extends State<NurseConfigDialog> {
         protocolVersion: widget.initial.protocolVersion,
         visualStyle: _visualStyle,
         callNurseText: _callText.text.trim(),
+        startupSubtitle: _startupSubtitle.text.trim(),
         quickAnswers: _quickAnswersSnapshot,
         offlineSpeechLanguage: widget.initial.offlineSpeechLanguage,
         settingsPassword: _password.text.trim(),
       ),
+    );
+  }
+
+  void _resetStartupSubtitle() {
+    final hospital =
+        _hospital.text.trim().isEmpty
+            ? NurseAppConfig.defaultHospitalName
+            : _hospital.text.trim();
+    final ward =
+        _ward.text.trim().isEmpty
+            ? NurseAppConfig.defaultWardName
+            : _ward.text.trim();
+    _startupSubtitle.text = NurseAppConfig.defaultStartupSubtitle(
+      hospital,
+      ward,
     );
   }
 }

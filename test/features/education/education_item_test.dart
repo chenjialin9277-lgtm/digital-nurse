@@ -4,7 +4,28 @@ import 'package:digital_nurse/features/education/models/education_language_conte
 import 'package:digital_nurse/models/offline_speech_language.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'education_test_fixtures.dart';
+
 void main() {
+  test('内容映射顺序不影响宣教项目相等性和集合查找', () {
+    final content = reviewedItem.contentFor(OfflineSpeechLanguage.mandarin);
+    final first = reviewedItem.copyWith(
+      contents: {
+        OfflineSpeechLanguage.mandarin: content,
+        OfflineSpeechLanguage.english: content,
+      },
+    );
+    final reordered = first.copyWith(
+      contents: {
+        OfflineSpeechLanguage.english: content,
+        OfflineSpeechLanguage.mandarin: content,
+      },
+    );
+
+    expect(reordered, first);
+    expect(reordered.hashCode, first.hashCode);
+    expect({first}.contains(reordered), isTrue);
+  });
   test('宣教项目可完整保存并恢复三语内容和理解题', () {
     final item = EducationItem(
       id: 'admission',
@@ -64,6 +85,33 @@ void main() {
     );
 
     expect(item.isAvailableIn(OfflineSpeechLanguage.english), isFalse);
+  });
+
+  test('视频宣教可独立保存，不要求文字正文或理解题', () {
+    final now = DateTime.utc(2026, 8, 18);
+    final item = EducationItem(
+      id: 'video-discharge',
+      category: '出院宣教',
+      contents: const {},
+      estimatedManualMinutes: 4,
+      sortOrder: 1,
+      favorite: false,
+      enabled: true,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      kind: EducationItemKind.video,
+      videoTitle: '出院换药示范',
+      videoPath: '/app/education_videos/discharge.mp4',
+    );
+
+    final restored = EducationItem.fromJson(item.toJson());
+
+    expect(restored, item);
+    expect(restored.isVideo, isTrue);
+    expect(restored.isAvailableIn(OfflineSpeechLanguage.mandarin), isTrue);
+    expect(restored.isAvailableIn(OfflineSpeechLanguage.english), isTrue);
+    expect(restored.contents, isEmpty);
   });
 
   test('理解确认结果不包含患者身份字段', () {

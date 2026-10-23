@@ -207,6 +207,34 @@ void main() {
     expect(online.resumeCalls, 1);
   });
 
+  test('松开说话键会等待麦克风启动完成后再停止', () async {
+    final online = _BlockingPushToTalkService();
+    final controller =
+        NurseController(xiaozhiService: online)
+          ..config = NurseAppConfig.defaults(
+            '02:11:22:33:44:55',
+            '11111111-2222-4333-8444-555555555555',
+          ).copyWith(
+            websocketUrl: 'wss://example.invalid/xiaozhi/v1/',
+            token: 'test-token',
+          )
+          ..state = NurseUiState.idle;
+
+    final start = controller.startPushToTalk();
+    await online.startEntered.future;
+
+    final stop = controller.stopPushToTalk();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(online.events, <String>['start-entered']);
+
+    online.releaseStart();
+    await Future.wait(<Future<void>>[start, stop]);
+
+    expect(online.events, <String>['start-entered', 'start-ready', 'stop']);
+    expect(controller.state, NurseUiState.thinking);
+  });
+
   test('旧版普通话固定回答保留并自动补全粤语英语', () {
     final defaults = NurseAppConfig.defaults('', '');
     final oldAnswers =
@@ -241,6 +269,45 @@ void main() {
 
     expect(fresh.departmentConfigured, isFalse);
     expect(migrated.departmentConfigured, isTrue);
+  });
+
+  test('旧版科室升级后自动生成本科室启动字幕', () {
+    final migrated = NurseAppConfig.fromJson(<String, dynamic>{
+      'hospitalName': '测试中心医院',
+      'wardName': '脊柱骨科一病区',
+    });
+
+    expect(
+      migrated.startupSubtitle,
+      '您好，我是测试中心医院脊柱骨科一病区数字护士。您可以向我询问入院、检查和出院注意事项。',
+    );
+  });
+
+  test('自定义启动字幕可完整保存和恢复', () {
+    final config = NurseAppConfig.defaults(
+      'device',
+      'client',
+    ).copyWith(startupSubtitle: '欢迎来到脊柱骨科一病区，请点击常用宣教或按住说话。');
+
+    final restored = NurseAppConfig.fromJson(config.toJson());
+
+    expect(restored.startupSubtitle, config.startupSubtitle);
+  });
+
+  test('控制器每次启动会将科室自定义文字显示到实时字幕', () async {
+    final config = NurseAppConfig.defaults('device', 'client').copyWith(
+      departmentConfigured: true,
+      startupSubtitle: '这是脊柱骨科一病区自定义的首屏字幕。',
+    );
+    final controller = NurseController(
+      repository: _MemoryNurseConfigRepository(config),
+      educationRepository: FakeEducationRepository(),
+    );
+
+    await controller.initializeLocalState();
+
+    expect(controller.assistantText, config.startupSubtitle);
+    controller.dispose();
   });
 
   test('固定宣教可超过8项并保留三语离线内容', () async {
@@ -329,6 +396,49 @@ void main() {
     expect(managementEntry, findsOneWidget);
     expect(find.byType(ExpansionTile), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('设置页可修改每次启动时的实时字幕', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final initial = NurseAppConfig.defaults(
+      'device',
+      'client',
+    ).copyWith(departmentConfigured: true);
+    NurseAppConfig? saved;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder:
+              (context) => Scaffold(
+                body: FilledButton(
+                  onPressed: () async {
+                    saved = await showDialog<NurseAppConfig>(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => NurseConfigDialog(initial: initial),
+                    );
+                  },
+                  child: const Text('打开设置'),
+                ),
+              ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开设置'));
+    await tester.pumpAndSettle();
+    const custom = '欢迎来到脊柱骨科一病区，请根据需要选择宣教内容。';
+    await tester.enterText(
+      find.byKey(const Key('startup-subtitle-field')),
+      custom,
+    );
+    final saveButton = find.text('保存并获取激活码');
+    await tester.ensureVisible(saveButton);
+    await tester.tap(saveButton);
+    await tester.pumpAndSettle();
+
+    expect(saved?.startupSubtitle, custom);
   });
 
   testWidgets('设置页顶部字段在大字体下为浮动标签保留完整显示空间', (tester) async {
@@ -572,6 +682,18 @@ class _FakeLocalSpeechService extends LocalSpeechService {
   Future<void> stop() async {}
 }
 
+class _MemoryNurseConfigRepository extends NurseConfigRepository {
+  _MemoryNurseConfigRepository(this.value);
+
+  NurseAppConfig value;
+
+  @override
+  Future<NurseAppConfig> load() async => value;
+
+  @override
+  Future<void> save(NurseAppConfig config) async => value = config;
+}
+
 class _FakeXiaozhiService extends XiaozhiService {
   _FakeXiaozhiService()
     : super(
@@ -601,4 +723,25 @@ class _FakeXiaozhiService extends XiaozhiService {
 
   @override
   Future<void> startListening({String mode = 'manual'}) async {}
+}
+
+class _BlockingPushToTalkService extends _FakeXiaozhiService {
+  final Completer<void> startEntered = Completer<void>();
+  final Completer<void> _startRelease = Completer<void>();
+  final List<String> events = <String>[];
+
+  @override
+  Future<void> startListening({String mode = 'manual'}) async {
+    events.add('start-entered');
+    startEntered.complete();
+    await _startRelease.future;
+    events.add('start-ready');
+  }
+
+  @override
+  Future<void> stopListening() async {
+    events.add('stop');
+  }
+
+  void releaseStart() => _startRelease.complete();
 }

@@ -1,0 +1,19 @@
+name: flutter_pcm_player
+description: Locally maintained Android-compatible PCM stream player.
+version: 0.0.1+digitalnurse.1
+publish_to: none
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.example.flutter_pcm_player
+        pluginClass: FlutterPcmPlayerPlugin
